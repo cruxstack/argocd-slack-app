@@ -474,5 +474,10 @@ func trimTo(s string, n int) string {
 	if len([]rune(s)) <= n {
 		return s
 	}
-	return string([]rune(s)[:n-1]) + "…"
+	r := []rune(s)[:n-1]
+	// end on a word when one ends near the cut
+	if i := strings.LastIndexByte(string(r), ' '); i > len(string(r))*3/4 {
+		r = []rune(string(r)[:i])
+	}
+	return strings.TrimRight(string(r), " ·,;:") + "…"
 }

@@ -223,7 +223,7 @@ func TestRenderEveryState(t *testing.T) {
 		}
 		checkPayload(t, "digest", RenderDigest("Daily summary · dev", []DigestRow{{App: "preview-06", Clusters: "dev-use1", For: "3d", Reason: "image not found", Note: "cleanup?"}}, Stats{Deploys: 31}, rich))
 	}
-	checkPayload(t, "baseline", RenderBaseline(cl, 18, []BaselineRow{{App: "api", Kind: "incident", Summary: "CrashLoopBackOff · database timeout", Since: at(-1300)}, {App: "worker", Kind: "deploy", Summary: "sync failed", Resolved: true}}, at(0)))
+	checkPayload(t, "baseline", RenderBaseline(cl, 18, []BaselineRow{{App: "api", Kind: "incident", Summary: "CrashLoopBackOff · database timeout", Since: at(-1300)}, {App: "worker", Kind: "deploy", Summary: "sync failed", Resolved: true}}))
 	home := RenderHome([]HomeCluster{{Name: "dev-use1", Enabled: true, Healthy: 11, Unhealthy: 7, Muted: 1}}, []Mute{*mute}, at(0))
 	if home["type"] != "home" {
 		t.Fatal("home view")

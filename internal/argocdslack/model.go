@@ -187,11 +187,13 @@ type ClusterMeta struct {
 
 // BaselineRow is one already-failing app in the cut-over message.
 type BaselineRow struct {
-	App      string    `json:"app"`
-	Kind     string    `json:"kind"` // incident | deploy
-	Summary  string    `json:"summary"`
-	Since    time.Time `json:"since,omitzero"`
-	Resolved bool      `json:"resolved,omitempty"`
+	App        string    `json:"app"`
+	Kind       string    `json:"kind"` // incident | deploy
+	Summary    string    `json:"summary"`
+	Detail     string    `json:"detail,omitempty"` // a log line or the first failure
+	Since      time.Time `json:"since,omitzero"`
+	Resolved   bool      `json:"resolved,omitempty"`
+	ResolvedAt time.Time `json:"resolved_at,omitzero"`
 }
 
 // Stats are daily counters for the digest.
