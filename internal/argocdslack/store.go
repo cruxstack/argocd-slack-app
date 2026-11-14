@@ -30,6 +30,8 @@ type Store interface {
 	AcquireLease(ctx context.Context, owner string, ttl time.Duration, now time.Time) (bool, error)
 	ReleaseLease(ctx context.Context, owner string) error
 	MarkOnce(ctx context.Context, key string, ttl time.Duration, now time.Time) (bool, error)
+	TryLock(ctx context.Context, name string, ttl time.Duration, now time.Time) (bool, error)
+	Unlock(ctx context.Context, name string) error
 }
 
 // Dynamo is the DynamoDB Store; pk/sk strings, a JSON doc and a version.
@@ -236,4 +238,28 @@ func (d *Dynamo) MarkOnce(ctx context.Context, k string, ttl time.Duration, now 
 		return false, nil
 	}
 	return err == nil, err
+}
+
+// TryLock takes a named lock that expires after ttl, so a crash never leaves
+// it held for long.
+func (d *Dynamo) TryLock(ctx context.Context, name string, ttl time.Duration, now time.Time) (bool, error) {
+	item := key("LOCK", name)
+	item["expires"], item["ttl"] = n(now.Add(ttl).Unix()), n(now.Add(ttl+time.Hour).Unix())
+	_, err := d.Client.PutItem(ctx, &dynamodb.PutItemInput{
+		TableName:                 aws.String(d.Table),
+		Item:                      item,
+		ConditionExpression:       aws.String("attribute_not_exists(pk) OR expires < :now"),
+		ExpressionAttributeValues: map[string]types.AttributeValue{":now": n(now.Unix())},
+	})
+	var cf *types.ConditionalCheckFailedException
+	if errors.As(err, &cf) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+// Unlock releases a named lock.
+func (d *Dynamo) Unlock(ctx context.Context, name string) error {
+	_, err := d.Client.DeleteItem(ctx, &dynamodb.DeleteItemInput{TableName: aws.String(d.Table), Key: key("LOCK", name)})
+	return err
 }

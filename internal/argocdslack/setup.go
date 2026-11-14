@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-lambda-go/events"
 
@@ -126,7 +127,7 @@ func (a *App) setup(ctx context.Context, req events.APIGatewayV2HTTPRequest) eve
 	method := req.RequestContext.HTTP.Method
 	switch {
 	case req.RawPath == "/setup" && method == "GET":
-		return a.setupPage(ctx, req, base, "", "")
+		return a.setupPage(ctx, req, base, setupNotices[req.QueryStringParameters["done"]], "")
 	case req.RawPath == "/setup" && method == "POST":
 		return a.setupSubmit(ctx, req, base)
 	case req.RawPath == "/slack/oauth/install" && method == "GET":
@@ -135,6 +136,16 @@ func (a *App) setup(ctx context.Context, req events.APIGatewayV2HTTPRequest) eve
 		return a.oauthCallback(ctx, req, base)
 	}
 	return respond(http.StatusMethodNotAllowed, "method not allowed")
+}
+
+// setupNotices are shown after a submit redirects back to the page. A form
+// may not redirect to Slack itself: the page's CSP limits form-action to
+// 'self', and browsers apply that to redirects too.
+var setupNotices = map[string]string{
+	"created":     "The Slack app is created. Install it to finish.",
+	"credentials": "The credentials are saved. Install the app to finish.",
+	"existing":    "This deployment already has a Slack app, so no new one was created. Install it below.",
+	"busy":        "The app is still being created from your first click. Refresh in a few seconds.",
 }
 
 func (a *App) setupSubmit(ctx context.Context, req events.APIGatewayV2HTTPRequest, base string) events.APIGatewayV2HTTPResponse {
@@ -146,18 +157,35 @@ func (a *App) setupSubmit(ctx context.Context, req events.APIGatewayV2HTTPReques
 		return a.setupPage(ctx, req, base, "", "The app is already installed, so its credentials can't be replaced here.")
 	}
 	var app CreatedApp
+	done := "credentials"
 	switch form.Get("action") {
 	case "create":
 		token := strings.TrimSpace(form.Get("config_token"))
 		if !strings.HasPrefix(token, "xoxe") {
 			return a.setupPage(ctx, req, base, "", "That isn't an app configuration token. They start with xoxe.")
 		}
+		// a double click or a stale tab must not create a second app
+		if a.setupStatus(ctx).HasApp {
+			return redirect(base + "/setup?done=existing")
+		}
+		if a.Store != nil {
+			ok, err := a.Store.TryLock(ctx, "setup-create", time.Minute, a.now())
+			if err != nil {
+				a.Log.WarnContext(ctx, "failed to take the setup lock", "error", err)
+			} else if !ok {
+				return redirect(base + "/setup?done=busy")
+			}
+			defer func() { _ = a.Store.Unlock(context.WithoutCancel(ctx), "setup-create") }()
+			if a.setupStatus(ctx).HasApp {
+				return redirect(base + "/setup?done=existing")
+			}
+		}
 		created, err := a.SetupAPI.CreateApp(ctx, token, Manifest(a.Cfg, base))
 		if err != nil {
 			a.Log.WarnContext(ctx, "failed to create slack app", "error", err)
 			return a.setupPage(ctx, req, base, "", "Slack didn't create the app: "+err.Error()+". Generate a fresh token and try again, or create the app yourself below.")
 		}
-		app = created
+		app, done = created, "created"
 		// the icon is cosmetic; setup goes on without it
 		if err := a.SetupAPI.SetIcon(ctx, token, created.AppID, assets.Icon); err != nil {
 			a.Log.WarnContext(ctx, "failed to set slack app icon", "app_id", created.AppID, "error", err)
@@ -181,7 +209,7 @@ func (a *App) setupSubmit(ctx context.Context, req events.APIGatewayV2HTTPReques
 		}
 	}
 	a.Log.InfoContext(ctx, "slack app credentials saved", "app_id", app.AppID)
-	return redirect(base + "/slack/oauth/install")
+	return redirect(base + "/setup?done=" + done)
 }
 
 func (a *App) oauthStart(ctx context.Context, base string) events.APIGatewayV2HTTPResponse {

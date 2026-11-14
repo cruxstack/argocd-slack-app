@@ -46,6 +46,7 @@ type fakeSetupAPI struct {
 	failWith error
 	iconApp  string
 	icon     []byte
+	creates  int
 }
 
 func (f *fakeSetupAPI) SetIcon(_ context.Context, _, appID string, png []byte) error {
@@ -58,6 +59,7 @@ func (f *fakeSetupAPI) CreateApp(_ context.Context, token string, manifest any) 
 		return CreatedApp{}, f.failWith
 	}
 	f.token, f.manifest = token, manifest
+	f.creates++
 	return CreatedApp{AppID: "A01", ClientID: "111.222", ClientSecret: strings.Repeat("a", 32), SigningSecret: strings.Repeat("b", 32)}, nil
 }
 
@@ -73,7 +75,7 @@ func setupApp(t *testing.T) (*App, *memSecrets, *fakeSetupAPI) {
 	cfg.Setup.Enabled = true
 	sec := &memSecrets{}
 	api := &fakeSetupAPI{team: "T1"}
-	return &App{Cfg: cfg, Log: quietLog(), Secrets: sec, SetupAPI: api}, sec, api
+	return &App{Cfg: cfg, Log: quietLog(), Store: newMemStore(), Secrets: sec, SetupAPI: api}, sec, api
 }
 
 func request(method, path string, form url.Values, cookies []string, query map[string]string) events.APIGatewayV2HTTPRequest {
@@ -125,8 +127,13 @@ func TestSetupWithConfigToken(t *testing.T) {
 	}
 
 	resp := app.HTTP(ctx, request("POST", "/setup", url.Values{"csrf": {csrf}, "action": {"create"}, "config_token": {"xoxe.xoxp-1"}}, []string{cookie}, nil), t0)
-	if resp.StatusCode != http.StatusSeeOther || resp.Headers["Location"] != "https://abc123.execute-api.us-east-1.amazonaws.com/slack/oauth/install" {
-		t.Fatalf("want redirect to install, got %d %v", resp.StatusCode, resp.Headers)
+	// The redirect stays on this page: CSP form-action blocks a redirect to Slack.
+	if resp.StatusCode != http.StatusSeeOther || resp.Headers["Location"] != "https://abc123.execute-api.us-east-1.amazonaws.com/setup?done=created" {
+		t.Fatalf("want redirect to step 2, got %d %v", resp.StatusCode, resp.Headers)
+	}
+	step2 := app.HTTP(ctx, request("GET", "/setup", nil, []string{cookie}, map[string]string{"done": "created"}), t0)
+	if !strings.Contains(step2.Body, setupNotices["created"]) || !strings.Contains(step2.Body, "Install to Slack") {
+		t.Fatal("step 2 should confirm the app and offer the install")
 	}
 	if api.token != "xoxe.xoxp-1" || sec.Get(ctx, SecretSigningSecret) != strings.Repeat("b", 32) || sec.Get(ctx, SecretClientID) != "111.222" {
 		t.Fatal("credentials not saved")
@@ -184,12 +191,44 @@ func TestSetupWithPastedCredentials(t *testing.T) {
 	}
 	ok := app.HTTP(ctx, request("POST", "/setup", url.Values{"csrf": {csrf}, "action": {"credentials"}, "client_id": {"111.222"},
 		"client_secret": {strings.Repeat("c", 32)}, "signing_secret": {strings.Repeat("d", 32)}}, []string{cookie}, nil), t0)
-	if ok.StatusCode != http.StatusSeeOther || sec.Get(ctx, SecretClientSecret) != strings.Repeat("c", 32) {
-		t.Fatalf("credentials: %d", ok.StatusCode)
+	if ok.StatusCode != http.StatusSeeOther || !strings.HasSuffix(ok.Headers["Location"], "/setup?done=credentials") || sec.Get(ctx, SecretClientSecret) != strings.Repeat("c", 32) {
+		t.Fatalf("credentials: %d %v", ok.StatusCode, ok.Headers)
 	}
 	page := app.HTTP(ctx, request("GET", "/setup", nil, []string{cookie}, nil), t0)
 	if !strings.Contains(page.Body, "Install to Slack") {
 		t.Fatal("step 2 should offer the install")
+	}
+}
+
+func TestSetupCreatesOneApp(t *testing.T) {
+	app, _, api := setupApp(t)
+	ctx := context.Background()
+	csrf, cookie := csrfFrom(t, app.HTTP(ctx, request("GET", "/setup", nil, nil, nil), t0))
+	create := func() events.APIGatewayV2HTTPResponse {
+		return app.HTTP(ctx, request("POST", "/setup", url.Values{"csrf": {csrf}, "action": {"create"}, "config_token": {"xoxe.xoxp-1"}}, []string{cookie}, nil), t0)
+	}
+
+	// While the first click is still creating the app, a second one waits.
+	if ok, _ := app.Store.TryLock(ctx, "setup-create", 0, t0); !ok {
+		t.Fatal("lock")
+	}
+	if resp := create(); !strings.HasSuffix(resp.Headers["Location"], "/setup?done=busy") || api.creates != 0 {
+		t.Fatalf("busy: %v, %d creates", resp.Headers, api.creates)
+	}
+	_ = app.Store.Unlock(ctx, "setup-create")
+
+	if resp := create(); !strings.HasSuffix(resp.Headers["Location"], "/setup?done=created") {
+		t.Fatalf("first: %v", resp.Headers)
+	}
+	if resp := create(); !strings.HasSuffix(resp.Headers["Location"], "/setup?done=existing") || api.creates != 1 {
+		t.Fatalf("second: %v, %d creates", resp.Headers, api.creates)
+	}
+	if ok, _ := app.Store.TryLock(ctx, "setup-create", 0, t0); !ok {
+		t.Fatal("the lock should be released")
+	}
+	page := app.HTTP(ctx, request("GET", "/setup", nil, nil, map[string]string{"done": "<b>x</b>"}), t0)
+	if strings.Contains(page.Body, `class="notice"`) {
+		t.Fatal("unknown notices must not render")
 	}
 }
 
