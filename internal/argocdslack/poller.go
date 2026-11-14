@@ -33,6 +33,7 @@ type App struct {
 	Now      func() time.Time
 	Secrets  Secrets
 	SetupAPI SetupAPI
+	Sleep    func(ctx context.Context, d time.Duration) // demo pacing; tests skip it
 
 	richOff atomic.Bool
 }
@@ -389,7 +390,7 @@ func (w *worker) remove(ctx context.Context, rec *AppRecord) {
 	w.sync(ctx, rec)
 	for i := range w.meta.BaselineRows {
 		if w.meta.BaselineRows[i].App == rec.App && !w.meta.BaselineRows[i].Resolved {
-			w.meta.BaselineRows[i].Resolved, w.meta.BaselineDirty = true, true
+			w.meta.BaselineRows[i].Resolved, w.meta.BaselineRows[i].ResolvedAt, w.meta.BaselineDirty = true, w.a.now(), true
 		}
 	}
 	if err := w.a.Store.DeleteRecord(ctx, rec.Cluster, rec.App); err != nil {

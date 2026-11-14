@@ -32,6 +32,7 @@
 - **Everything CI runs**: `make check`
 
 - **Setup page locally**: `make preview` (`STEP=1|2|3` starts at each step), at http://127.0.0.1:8080/setup
+- **Slack messages locally**: `make demo-payloads` writes every `/argocd demo` message version to `tmp/demo`, with Block Kit Builder links in `links.txt`
 
 `make test-live` reads a real cluster through `kubectl proxy`; only run it when asked.
 

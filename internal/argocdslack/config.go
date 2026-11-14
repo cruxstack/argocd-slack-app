@@ -180,6 +180,8 @@ func LoadConfig(raw string) (Config, error) {
 			problems = append(problems, fmt.Sprintf("clusters[%d] needs a name", i))
 		case seen[cl.Name]:
 			problems = append(problems, fmt.Sprintf("cluster %q is listed twice", cl.Name))
+		case cl.Name == DemoCluster:
+			problems = append(problems, fmt.Sprintf("cluster name %q is kept for `/argocd demo`", DemoCluster))
 		}
 		seen[cl.Name] = true
 		if cl.Cluster == "" {

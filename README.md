@@ -33,6 +33,11 @@ to Argo CD and no Argo CD notification triggers. Deploy it with
 - **Baseline and digest** - when a cluster joins, apps that are already failing
   are summarised in one message. A weekday digest lists anything unhealthy for
   more than a day.
+- **Demo** - `/argocd demo` plays every message type in the current channel
+  with made-up apps on a `demo` cluster: deploys that roll out, fail and get
+  fixed, an incident that flaps and is muted, a baseline and a digest. Each
+  message updates in place over about two minutes. `/argocd demo incident`
+  plays one story.
 - **Owner mentions** - optional, for incidents and failed deploys in
   environments named `prod`.
 - **Durable** - state lives in DynamoDB, so restarts never repost or lose a
@@ -152,6 +157,7 @@ make help        # list targets
 make test        # tests with the race detector
 make lint        # golangci-lint
 make check       # everything CI runs
+make demo-payloads  # every demo message as Block Kit Builder JSON in tmp/demo
 ```
 
 `make test-live` runs one poll against a real cluster through `kubectl proxy`

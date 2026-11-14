@@ -24,25 +24,20 @@ func resetBaseline(meta *ClusterMeta) {
 func (w *worker) collectBaseline(rec *AppRecord) {
 	if d := rec.Deploy; d != nil && d.State == DeployFailed {
 		d.Baseline = true
-		summary := "sync failed"
+		detail := firstLine(d.OpMessage)
 		if len(d.Failures) > 0 {
-			summary = "sync failed: " + stripMrkdwn(d.Failures[0])
-		} else if d.OpMessage != "" {
-			summary = "sync failed: " + firstLine(d.OpMessage)
+			detail = stripMrkdwn(d.Failures[0])
 		}
-		w.addRow(BaselineRow{App: rec.App, Kind: "deploy", Summary: trimTo(summary, 140), Since: d.FinishedAt})
+		w.addRow(BaselineRow{App: rec.App, Kind: "deploy", Summary: "sync failed", Detail: trimTo(detail, 120), Since: d.FinishedAt})
 		return
 	}
 	if inc := rec.Incident; inc != nil && inc.State == IncidentOpen {
 		inc.Baseline = true
-		summary := strings.ToLower(inc.Health)
-		if inc.Reason != nil && inc.Reason.Summary != "" {
-			summary = inc.Reason.Summary
-			if inc.Reason.Excerpt != "" {
-				summary += " · " + trimTo(inc.Reason.Excerpt, 60)
-			}
+		summary, detail := strings.ToLower(inc.Health), ""
+		if r := inc.Reason; r != nil {
+			summary, detail = orDefault(r.Summary, summary), r.Excerpt
 		}
-		w.addRow(BaselineRow{App: rec.App, Kind: "incident", Summary: trimTo(summary, 140), Since: inc.FirstUnhealthyAt})
+		w.addRow(BaselineRow{App: rec.App, Kind: "incident", Summary: trimTo(summary, 100), Detail: trimTo(detail, 120), Since: inc.FirstUnhealthyAt})
 	}
 }
 
@@ -72,14 +67,14 @@ func (w *worker) baselineProgress(rec *AppRecord) {
 			done = rec.Incident == nil || !rec.Incident.Baseline
 		}
 		if done {
-			r.Resolved, w.meta.BaselineDirty = true, true
+			r.Resolved, r.ResolvedAt, w.meta.BaselineDirty = true, w.a.now(), true
 		}
 	}
 }
 
 func (w *worker) postBaseline(ctx context.Context, total int) {
 	channel := w.a.Cfg.ChannelFor(w.cl)
-	render := func(bool) Payload { return RenderBaseline(w.cl, total, w.meta.BaselineRows, w.a.now()) }
+	render := func(bool) Payload { return RenderBaseline(w.cl, total, w.meta.BaselineRows) }
 	msg, err := w.post(ctx, channel, render)
 	if err != nil {
 		w.a.Log.Error("post baseline", "cluster", w.cl.Name, "error", err)
@@ -95,7 +90,7 @@ func (w *worker) updateBaseline(ctx context.Context) {
 		return
 	}
 	total := len(w.snaps)
-	render := func(bool) Payload { return RenderBaseline(w.cl, total, w.meta.BaselineRows, w.a.now()) }
+	render := func(bool) Payload { return RenderBaseline(w.cl, total, w.meta.BaselineRows) }
 	if err := w.update(ctx, w.meta.Baseline, render); err != nil {
 		w.a.Log.Error("update baseline", "cluster", w.cl.Name, "error", err)
 		return

@@ -17,13 +17,14 @@ import (
 
 // Job is an async or scheduled unit of work for this same Lambda.
 type Job struct {
-	Job     string `json:"job"`
-	User    string `json:"user,omitempty"`
-	Channel string `json:"channel,omitempty"`
-	Cluster string `json:"cluster,omitempty"`
-	App     string `json:"app,omitempty"`
-	ID      string `json:"id,omitempty"`
-	Mute    *Mute  `json:"mute,omitempty"`
+	Job     string     `json:"job"`
+	User    string     `json:"user,omitempty"`
+	Channel string     `json:"channel,omitempty"`
+	Cluster string     `json:"cluster,omitempty"`
+	App     string     `json:"app,omitempty"`
+	ID      string     `json:"id,omitempty"`
+	Mute    *Mute      `json:"mute,omitempty"`
+	Demo    *DemoState `json:"demo,omitempty"`
 }
 
 // Handle is the Lambda entry point: API Gateway requests, scheduler inputs
@@ -70,6 +71,8 @@ func (a *App) RunJob(ctx context.Context, job Job, requestID string) error {
 		return a.Ack(ctx, job)
 	case "mute_created":
 		return a.muteCreated(ctx, job)
+	case "demo":
+		return a.RunDemo(ctx, job.Demo)
 	}
 	return fmt.Errorf("unknown job %q", job.Job)
 }
@@ -186,7 +189,8 @@ const helpText = "*/argocd* commands:\n" +
 	"• `/argocd mute api@prod-use1 4h waiting on a fix` mutes one app on one cluster (also a cluster such as `prod-use1`, an environment such as `prod`, or an app everywhere; durations like `1h`, `1d`, `1w`, or `until-healthy`)\n" +
 	"• `/argocd mutes` lists active mutes\n" +
 	"• `/argocd unmute <id or scope>` ends a mute\n" +
-	"• `/argocd status [app]` shows what's unhealthy"
+	"• `/argocd status [app]` shows what's unhealthy\n" +
+	"• `/argocd demo` plays every message type in this channel with made-up apps; `/argocd demo incident` plays one story (deploy, failed, unhealthy, incident, baseline, digest)"
 
 func (a *App) command(ctx context.Context, form url.Values, now time.Time) events.APIGatewayV2HTTPResponse {
 	user, channel := form.Get("user_id"), form.Get("channel_id")
@@ -251,6 +255,8 @@ func (a *App) command(ctx context.Context, form url.Values, now time.Time) event
 		return ephemeral("🔔 Unmuted " + strings.Join(ended, ", ") + ".")
 	case "status":
 		return ephemeral(a.statusText(ctx, args[1:]))
+	case "demo":
+		return a.startDemo(ctx, channel, user, args[1:], now)
 	}
 	return ephemeral(helpText)
 }
@@ -339,6 +345,12 @@ func (a *App) interaction(ctx context.Context, raw []byte, now time.Time) events
 			v = act.SelectedOption.Value
 		}
 		parts := strings.Split(v, "|")
+		if demoAction(act.ActionID, parts) {
+			if err := a.Slack.Ephemeral(ctx, p.Channel.ID, p.User.ID, "That's a demo message, so its buttons don't act on anything."); err != nil {
+				a.Log.WarnContext(ctx, "failed to answer a demo button", "error", err)
+			}
+			return respond(http.StatusOK, "")
+		}
 		switch {
 		case act.ActionID == "ack" && len(parts) == 3:
 			a.async(ctx, Job{Job: "ack", Cluster: parts[0], App: parts[1], ID: parts[2], User: p.User.ID, Channel: p.Channel.ID})

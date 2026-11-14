@@ -31,6 +31,11 @@ clean: ## remove build output
 
 ##@ local runs
 
+.PHONY: demo-payloads
+demo-payloads: ## write every /argocd demo message as Block Kit Builder JSON to DIR (default tmp/demo)
+	mkdir -p $(or $(DIR),tmp/demo)
+	DEMO_PAYLOADS=$(abspath $(or $(DIR),tmp/demo)) go test -count=1 -run TestWriteDemoPayloads ./internal/argocdslack/
+
 .PHONY: preview
 preview: ## serve the setup page on localhost with mocks (STEP=1|2|3)
 	go run ./cmd/preview -step $(or $(STEP),1)
