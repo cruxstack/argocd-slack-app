@@ -25,8 +25,18 @@ type Config struct {
 	SCM             SCM               `json:"scm"`
 	Links           []Link            `json:"links"`
 	Clusters        []Cluster         `json:"clusters"`
+	Setup           SetupConfig       `json:"setup"`
 
 	loc *time.Location
+}
+
+// SetupConfig controls the web installer that creates and installs the Slack
+// app. Turn it on for the first deploy and off once the app is installed.
+type SetupConfig struct {
+	Enabled bool   `json:"enabled"`
+	AppName string `json:"app_name"`
+	BaseURL string `json:"base_url"`
+	Command string `json:"command"`
 }
 
 // Grace holds every timing rule.
@@ -149,6 +159,12 @@ func LoadConfig(raw string) (Config, error) {
 	if c.SCM.PRURL == "" {
 		c.SCM.PRURL = "https://github.com/{repo}/pull/{pr}"
 	}
+	if c.Setup.AppName == "" {
+		c.Setup.AppName = "Argo CD"
+	}
+	if c.Setup.Command == "" {
+		c.Setup.Command = "/argocd"
+	}
 
 	var problems []string
 	loc, err := time.LoadLocation(c.Timezone)
@@ -178,6 +194,9 @@ func LoadConfig(raw string) (Config, error) {
 		if cl.Region == "" {
 			cl.Region = "us-east-1"
 		}
+	}
+	if !strings.HasPrefix(c.Setup.Command, "/") || strings.ContainsAny(c.Setup.Command, " \t") {
+		problems = append(problems, "setup.command must look like /argocd")
 	}
 	for _, l := range c.Links {
 		if l.Text == "" || l.URL == "" {

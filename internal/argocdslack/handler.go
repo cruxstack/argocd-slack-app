@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"sort"
 	"strings"
@@ -27,7 +28,7 @@ type Job struct {
 
 // Handle is the Lambda entry point: API Gateway requests, scheduler inputs
 // and async jobs all arrive here.
-func (a *App) Handle(ctx context.Context, raw json.RawMessage, requestID, signingSecret string) (any, error) {
+func (a *App) Handle(ctx context.Context, raw json.RawMessage, requestID string) (any, error) {
 	if !a.Cfg.Rich() {
 		a.richOff.Store(true)
 	}
@@ -38,7 +39,7 @@ func (a *App) Handle(ctx context.Context, raw json.RawMessage, requestID, signin
 	}
 	_ = json.Unmarshal(raw, &probe)
 	if probe.RawPath != "" && probe.RequestContext != nil {
-		return a.httpRaw(ctx, raw, signingSecret), nil
+		return a.httpRaw(ctx, raw), nil
 	}
 	var job Job
 	if err := json.Unmarshal(raw, &job); err != nil {
@@ -47,13 +48,13 @@ func (a *App) Handle(ctx context.Context, raw json.RawMessage, requestID, signin
 	return nil, a.RunJob(ctx, job, requestID)
 }
 
-func (a *App) httpRaw(ctx context.Context, raw json.RawMessage, signingSecret string) events.APIGatewayV2HTTPResponse {
+func (a *App) httpRaw(ctx context.Context, raw json.RawMessage) events.APIGatewayV2HTTPResponse {
 	var req events.APIGatewayV2HTTPRequest
 	if err := json.Unmarshal(raw, &req); err != nil {
 		a.Log.WarnContext(ctx, "failed to decode api gateway request", "error", err)
-		return respond(400, "bad request")
+		return respond(http.StatusBadRequest, "bad request")
 	}
-	return a.HTTP(ctx, req, signingSecret, a.now())
+	return a.HTTP(ctx, req, a.now())
 }
 
 // RunJob runs a scheduled or async job.
@@ -79,19 +80,23 @@ func respond(code int, body string) events.APIGatewayV2HTTPResponse {
 
 func respondJSON(v any) events.APIGatewayV2HTTPResponse {
 	b, _ := json.Marshal(v)
-	return events.APIGatewayV2HTTPResponse{StatusCode: 200, Body: string(b), Headers: map[string]string{"Content-Type": "application/json"}}
+	return events.APIGatewayV2HTTPResponse{StatusCode: http.StatusOK, Body: string(b), Headers: map[string]string{"Content-Type": "application/json"}}
 }
 
-// HTTP routes Slack's requests after checking their signature.
-func (a *App) HTTP(ctx context.Context, req events.APIGatewayV2HTTPRequest, secret string, now time.Time) events.APIGatewayV2HTTPResponse {
+// HTTP serves the installer pages and routes Slack's requests after checking
+// their signature.
+func (a *App) HTTP(ctx context.Context, req events.APIGatewayV2HTTPRequest, now time.Time) events.APIGatewayV2HTTPResponse {
 	if req.RawPath == "/healthz" {
-		return respond(200, "ok")
+		return respond(http.StatusOK, "ok")
+	}
+	if isSetupPath(req.RawPath) {
+		return a.setup(ctx, req)
 	}
 	body := []byte(req.Body)
 	if req.IsBase64Encoded {
 		b, err := base64.StdEncoding.DecodeString(req.Body)
 		if err != nil {
-			return respond(400, "bad body")
+			return respond(http.StatusBadRequest, "bad body")
 		}
 		body = b
 	}
@@ -103,12 +108,27 @@ func (a *App) HTTP(ctx context.Context, req events.APIGatewayV2HTTPRequest, secr
 		}
 		return ""
 	}
+	// Slack checks the events URL while the app is being created, before
+	// this deployment has its signing secret; echoing the challenge is safe.
+	if req.RawPath == "/slack/events" {
+		var probe struct {
+			Type      string `json:"type"`
+			Challenge string `json:"challenge"`
+		}
+		if json.Unmarshal(body, &probe) == nil && probe.Type == "url_verification" {
+			return respondJSON(map[string]string{"challenge": probe.Challenge})
+		}
+	}
+	secret := ""
+	if a.Secrets != nil {
+		secret = a.Secrets.Get(ctx, SecretSigningSecret)
+	}
 	if secret == "" {
-		return respond(503, "signing secret not configured")
+		return respond(http.StatusServiceUnavailable, "the Slack app isn't set up yet")
 	}
 	if err := VerifySignature(secret, h("X-Slack-Request-Timestamp"), h("X-Slack-Signature"), body, now); err != nil {
 		a.Log.Warn("rejected Slack request", "path", req.RawPath, "error", err)
-		return respond(401, "invalid signature")
+		return respond(http.StatusUnauthorized, "invalid signature")
 	}
 	switch req.RawPath {
 	case "/slack/events":
@@ -120,7 +140,7 @@ func (a *App) HTTP(ctx context.Context, req events.APIGatewayV2HTTPRequest, secr
 		form, _ := url.ParseQuery(string(body))
 		return a.interaction(ctx, []byte(form.Get("payload")), now)
 	}
-	return respond(404, "not found")
+	return respond(http.StatusNotFound, "not found")
 }
 
 func (a *App) async(ctx context.Context, job Job) {
@@ -144,7 +164,7 @@ func (a *App) slackEvent(ctx context.Context, body []byte) events.APIGatewayV2HT
 		} `json:"event"`
 	}
 	if err := json.Unmarshal(body, &ev); err != nil {
-		return respond(400, "bad event")
+		return respond(http.StatusBadRequest, "bad event")
 	}
 	switch ev.Type {
 	case "url_verification":
@@ -154,7 +174,7 @@ func (a *App) slackEvent(ctx context.Context, body []byte) events.APIGatewayV2HT
 			a.async(ctx, Job{Job: "home", User: ev.Event.User})
 		}
 	}
-	return respond(200, "")
+	return respond(http.StatusOK, "")
 }
 
 func ephemeral(text string) events.APIGatewayV2HTTPResponse {
@@ -180,7 +200,7 @@ func (a *App) command(ctx context.Context, form url.Values, now time.Time) event
 			if err := a.Slack.OpenView(ctx, form.Get("trigger_id"), RenderMuteModal(a.Cfg, MuteContext{Channel: channel})); err != nil {
 				return ephemeral("Couldn't open the mute form: " + err.Error())
 			}
-			return respond(200, "")
+			return respond(http.StatusOK, "")
 		}
 		m, err := ParseMuteArgs(a.Cfg, args[1:], now)
 		if err != nil {
@@ -306,12 +326,12 @@ type interactionPayload struct {
 func (a *App) interaction(ctx context.Context, raw []byte, now time.Time) events.APIGatewayV2HTTPResponse {
 	var p interactionPayload
 	if err := json.Unmarshal(raw, &p); err != nil {
-		return respond(400, "bad payload")
+		return respond(http.StatusBadRequest, "bad payload")
 	}
 	switch p.Type {
 	case "block_actions":
 		if len(p.Actions) == 0 {
-			return respond(200, "")
+			return respond(http.StatusOK, "")
 		}
 		act := p.Actions[0]
 		v := act.Value
@@ -339,10 +359,10 @@ func (a *App) interaction(ctx context.Context, raw []byte, now time.Time) events
 			}
 			a.async(ctx, Job{Job: "home", User: p.User.ID})
 		}
-		return respond(200, "")
+		return respond(http.StatusOK, "")
 	case "view_submission":
 		if p.View.CallbackID != "mute_submit" {
-			return respond(200, "")
+			return respond(http.StatusOK, "")
 		}
 		var mc MuteContext
 		_ = json.Unmarshal([]byte(p.View.PrivateMetadata), &mc)
@@ -355,9 +375,9 @@ func (a *App) interaction(ctx context.Context, raw []byte, now time.Time) events
 			return respondJSON(map[string]any{"response_action": "errors", "errors": map[string]string{"reason": "Couldn't save the mute: " + err.Error()}})
 		}
 		a.async(ctx, Job{Job: "mute_created", Mute: &m, Channel: mc.Channel, User: p.User.ID})
-		return respond(200, "")
+		return respond(http.StatusOK, "")
 	}
-	return respond(200, "")
+	return respond(http.StatusOK, "")
 }
 
 func (a *App) openMute(ctx context.Context, trigger string, mc MuteContext) {

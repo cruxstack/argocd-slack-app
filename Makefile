@@ -29,6 +29,12 @@ build-lambda: ## build the lambda bootstrap binary (dist/bootstrap) for linux an
 clean: ## remove build output
 	rm -rf $(DIST) release coverage.out
 
+##@ local runs
+
+.PHONY: preview
+preview: ## serve the setup page on localhost with mocks (STEP=1|2|3)
+	go run ./cmd/preview -step $(or $(STEP),1)
+
 ##@ test
 
 .PHONY: test

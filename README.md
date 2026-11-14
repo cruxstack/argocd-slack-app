@@ -1,5 +1,7 @@
 # argocd-slack-app
 
+<img src="assets/icon.png" alt="argocd-slack-app icon" width="96" align="right">
+
 A Slack app for [Argo CD](https://argo-cd.readthedocs.io/) that posts **one
 message per deploy and one message per incident**, then edits that message as
 things change: syncing, rolling out, healthy or failed, degraded and
@@ -35,6 +37,8 @@ to Argo CD and no Argo CD notification triggers. Deploy it with
   environments named `prod`.
 - **Durable** - state lives in DynamoDB, so restarts never repost or lose a
   message.
+- **Web installer** - a setup page creates the Slack app from its manifest and
+  installs it with OAuth, saving every credential to SSM.
 
 ## How it works
 
@@ -43,6 +47,7 @@ EventBridge (every minute) ─▶ Lambda ─▶ EKS API (list, then watch for 55
                                 │  ├─▶ DynamoDB (app state, mutes, lease)
                                 │  └─▶ Slack Web API (post, update, thread replies)
 Slack (buttons, /argocd, App Home) ─▶ API Gateway ─▶ Lambda (signature checked)
+Browser (/setup, OAuth install)    ─▶ API Gateway ─▶ Lambda ─▶ SSM Parameter Store
 ```
 
 Each minute the Lambda takes a DynamoDB lease, lists every Application in each
@@ -84,29 +89,51 @@ See [docs/configuration.md](docs/configuration.md) for every field: timing
 rules, link templates, annotation names for commit metadata, SCM URLs, owners
 and per-cluster settings. Other environment variables:
 
-| Name                   | Value                                                    |
-| ---------------------- | -------------------------------------------------------- |
-| `SLACK_BOT_TOKEN`      | SSM SecureString parameter ARN of the bot token          |
-| `SLACK_SIGNING_SECRET` | SSM SecureString parameter ARN of the signing secret     |
-| `TABLE_NAME`           | DynamoDB table with string keys `pk` and `sk`, TTL `ttl` |
-| `LOG_LEVEL`            | `info` (default) or `debug`                              |
+| Name                   | Value                                                          |
+| ---------------------- | -------------------------------------------------------------- |
+| `SLACK_BOT_TOKEN`      | SSM parameter ARN of the bot token                             |
+| `SLACK_SIGNING_SECRET` | SSM parameter ARN of the signing secret                        |
+| `SLACK_CLIENT_ID`      | SSM parameter ARN of the OAuth client ID (installer)           |
+| `SLACK_CLIENT_SECRET`  | SSM parameter ARN of the OAuth client secret (installer)       |
+| `SLACK_TEAM`           | SSM parameter ARN of the installed workspace (installer)       |
+| `SSM_KMS_KEY_ID`       | KMS key for parameters the installer writes (default `aws/ssm`) |
+| `TABLE_NAME`           | DynamoDB table with string keys `pk` and `sk`, TTL `ttl`       |
+| `LOG_LEVEL`            | `info` (default) or `debug`                                    |
 
 ## Slack app
 
-Create the app from [docs/slack-app-manifest.yaml](docs/slack-app-manifest.yaml):
+Turn on the installer (`"setup": {"enabled": true}`) for the first deploy and
+open `https://<api-endpoint>/setup`. The page offers two ways to create the app:
 
-1. At [api.slack.com/apps](https://api.slack.com/apps), choose **Create New
-   App** → **From a manifest**. Paste the manifest without
-   `settings.event_subscriptions`, because Slack verifies that URL
-   immediately.
-2. **Install to Workspace**, then copy the **Bot User OAuth Token** and, under
-   **Basic Information**, the **Signing Secret** into the two SSM parameters.
-3. Deploy. Replace `REPLACE` in the manifest with the API Gateway host, add
-   `event_subscriptions` back and save.
-4. Invite the bot to its channels.
+- **Paste an app configuration token** (from
+  [api.slack.com/apps](https://api.slack.com/apps) → *Your App Configuration
+  Tokens*). The function creates the app from its manifest with every URL
+  already filled in and saves the signing secret and OAuth client credentials.
+  The token is used once and never stored.
+- **Create it yourself** from a link that opens Slack's *Create app* dialog with
+  the manifest prefilled, then paste the client ID, client secret and signing
+  secret back into the page.
 
-Scopes: `chat:write`, `commands`, `channels:history` (to find its own messages)
-and `usergroups:read` (to check owner groups).
+Then click **Install to Slack**. Slack's OAuth redirect brings the bot token
+back to the function, which saves it with the workspace ID. Invite the bot to
+its channels and turn the installer off.
+
+Every credential goes to SSM Parameter Store, never to Terraform state or the
+browser. The installer refuses to replace credentials once the app is
+installed, and refuses an install into a different workspace. Its forms carry
+a CSRF token, and the OAuth callback checks a state cookie.
+
+To set the app up by hand instead, use
+[docs/slack-app-manifest.yaml](docs/slack-app-manifest.yaml) and write the SSM
+parameters yourself.
+
+### Icon
+
+[assets/icon.png](assets/icon.png) is the app's icon: a 1024×1024 PNG, inside
+Slack's 512–2000 px square range, drawn from [assets/icon.svg](assets/icon.svg).
+The installer sets it with `apps.icon.set` when you create the app with a
+configuration token. Otherwise upload it under **Basic Information → Display
+Information**; the setup page offers it as a download.
 
 ## Cluster access
 
