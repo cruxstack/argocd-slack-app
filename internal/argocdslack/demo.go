@@ -476,7 +476,7 @@ func (w *worker) demoFrame(ctx context.Context, st *DemoState, f demoFrame) {
 	}
 	switch {
 	case f.Baseline:
-		render := func(bool) Payload { return RenderBaseline(w.cl, len(w.snaps), w.meta.BaselineRows) }
+		render := func(rich bool) Payload { return RenderBaseline(w.a.Cfg, w.cl, len(w.snaps), w.meta.BaselineRows, rich) }
 		msg, err := w.post(ctx, w.a.Cfg.ChannelFor(w.cl), render)
 		if err != nil {
 			w.a.Log.Error("post demo baseline", "error", err)

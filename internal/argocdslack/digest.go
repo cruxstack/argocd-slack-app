@@ -100,7 +100,7 @@ func (a *App) Digest(ctx context.Context) error {
 		for _, it := range list {
 			sort.Strings(it.clusters)
 			it.row.Clusters = strings.Join(it.clusters, ", ")
-			it.row.For = short(it.age)
+			it.row.For, it.row.Age = short(it.age), it.age
 			rows = append(rows, it.row)
 		}
 		first, err := a.Store.MarkOnce(ctx, "digest#"+today+"#"+ch, 3*24*time.Hour, now)

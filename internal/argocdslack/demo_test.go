@@ -96,7 +96,7 @@ func TestDemoPlaysEveryStory(t *testing.T) {
 	}
 
 	all := strings.NewReplacer(`\u003c`, "<", `\u003e`, ">").Replace(mustJSON(slack.updates))
-	for _, w := range []string{"flapped 1×", "Muted until healthy by <@U9>", "<@U9> is on it", "Roll out 2/3 pods", "Fixed by the", "legacy-reports recovered at", "OOMKilled"} {
+	for _, w := range []string{"flapped 1×", "Muted until healthy by <@U9>", "<@U9> is on it", "rolling out 2/3 pods", "Fixed by the", "legacy-reports recovered at", "OOMKilled"} {
 		if !strings.Contains(all, w) {
 			t.Errorf("no update shows %q", w)
 		}

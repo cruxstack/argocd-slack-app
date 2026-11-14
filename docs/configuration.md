@@ -13,12 +13,13 @@ Invalid config stops the function at startup with every problem listed.
 | `dry_run`          | `false`                                     | Log every Slack call instead of making it.                                                        |
 | `timezone`         | `UTC`                                       | Zone for the digest's date. Message times use Slack date tokens, so each reader sees their own.   |
 | `watch_seconds`    | `55`                                        | How long each run watches before the next one starts (1–58).                                      |
-| `rich_blocks`      | `true`                                      | Use the `plan` and `container` blocks. The app also falls back on its own if Slack refuses them.  |
+| `rich_blocks`      | `true`                                      | Frame statuses in `container` blocks and the digest in a `data_table`. The app also falls back on its own if Slack refuses them. |
+| `icon_base_url`    | this release on GitHub                      | Where Slack loads the status icons (`ok.png`, `fail.png`, `warn.png`, `run.png`, `muted.png`); `none` turns them off. |
 | `preview_prefix`   | `preview-`                                  | Apps with this prefix are flagged as cleanup candidates in the digest.                            |
 | `owners`           | `{}`                                        | App name to a Slack user group ID (`S…`) or user ID (`U…`), mentioned on `prod` incidents and failed deploys. |
 | `annotations`      | all `""`                                    | Application annotation names for deploy metadata; see below.                                      |
 | `scm`              | GitHub                                      | `commit_url` and `pr_url` templates with `{repo}`, `{commit}` and `{pr}`.                         |
-| `links`            | `[]`                                        | Buttons on every message; see below.                                                              |
+| `links`            | `[]`                                        | Links on every message; see below.                                                                |
 | `grace`            | see below                                   | Timing rules.                                                                                     |
 | `clusters`         | required                                    | The Argo CD instances to watch.                                                                   |
 | `setup`            | off                                         | The web installer; see below.                                                                     |
@@ -59,7 +60,7 @@ an unrendered `{{placeholder}}` count as empty.
 
 ## Links
 
-`links` (global) and each cluster's `links` add up to three buttons, cluster
+`links` (global) and each cluster's `links` add up to three links, cluster
 links first. URLs are templates; each `{name}` is replaced, URL-escaped, with
 one of `app`, `namespace` (the destination namespace), `cluster`, `env`,
 `region`, or a key from the cluster's `vars`:
@@ -87,11 +88,11 @@ limited to 4 KB in total.
 | `region`     | `us-east-1` | The cluster's AWS region.                                                    |
 | `role_arn`   | `""`        | Role to assume for the cluster; empty uses the function's own role.          |
 | `namespace`  | `argocd`    | Namespace of the Argo CD Applications.                                       |
-| `argocd_url` | `""`        | Argo CD web URL, for the Argo CD button.                                     |
+| `argocd_url` | `""`        | Argo CD web URL, for the Argo CD link.                                       |
 | `channel`    | `""`        | Slack channel ID; falls back to the top-level `channel`.                     |
 | `enabled`    | `false`     | Watch this cluster.                                                          |
 | `log_lines`  | `false`     | Show one redacted error line from a crashed container. Needs `pods/log`.     |
-| `links`      | `[]`        | Extra buttons for this cluster.                                              |
+| `links`      | `[]`        | Extra links for this cluster.                                                |
 | `vars`       | `{}`        | Values for link templates.                                                   |
 
 When a cluster is enabled it posts one baseline message listing apps that are

@@ -204,15 +204,18 @@ func TestRenderEveryState(t *testing.T) {
 		Details: []string{"Startup probe failed ×565", "Back-off restarting container ×1386"}, Excerpt: apiExcerpt, Image: "api:v1.4.2", Pods: 2}
 	mute := &Mute{ID: "a1", App: "api", Cluster: "dev-use1", Kinds: []string{KindIncidents}, Until: t0.Add(time.Hour), By: "U1", Reason: "waiting"}
 	for _, rich := range []bool{true, false} {
-		v := View{Cluster: cl, App: "api", Namespace: "apps", Rich: rich, Now: at(30)}
+		v := View{Cfg: cfg, Cluster: cl, App: "api", Namespace: "apps", Rich: rich, Now: at(30)}
 		for _, st := range []DeployState{DeploySyncing, DeployRolling, DeployStalled, DeployHealthy, DeployFailed, DeployUnhealthy, DeployRecovered, DeploySuperseded} {
 			d := &Deploy{ID: "x", State: st, StartedAt: at(0), SyncedAt: at(0).Add(5 * time.Second), FinishedAt: at(2), Attempts: 5, Repo: "acme/web", Commit: "c3d4e5f0000",
 				PR: "128", Title: "feat: render the pricing page on the server", Progress: "2/4", Reason: reason,
 				Failures: []string{"*PreSync job* `worker-migrate`: job has reached the specified backoff limit"}}
 			p := RenderDeploy(v, d)
 			checkPayload(t, fmt.Sprintf("deploy %s rich=%v", st, rich), p)
-			if rich && (st == DeployRolling) && !strings.Contains(mustJSON(p), `"type":"plan"`) {
-				t.Error("rich rolling deploy should use a plan block")
+			if rich && (len(p.Blocks) != 1 || p.Blocks[0]["type"] != "container" || !strings.Contains(mustJSON(p), "/assets/status/")) {
+				t.Errorf("rich deploy %s should be one container with a status icon", st)
+			}
+			if !rich && strings.Contains(mustJSON(p), `"container"`) {
+				t.Errorf("basic deploy %s must not use a container", st)
 			}
 		}
 		for _, st := range []IncidentState{IncidentOpen, IncidentResolved, IncidentClosed} {
@@ -223,7 +226,21 @@ func TestRenderEveryState(t *testing.T) {
 		}
 		checkPayload(t, "digest", RenderDigest("Daily summary · dev", []DigestRow{{App: "preview-06", Clusters: "dev-use1", For: "3d", Reason: "image not found", Note: "cleanup?"}}, Stats{Deploys: 31}, rich))
 	}
-	checkPayload(t, "baseline", RenderBaseline(cl, 18, []BaselineRow{{App: "api", Kind: "incident", Summary: "CrashLoopBackOff · database timeout", Since: at(-1300)}, {App: "worker", Kind: "deploy", Summary: "sync failed", Resolved: true}}))
+	for _, rich := range []bool{true, false} {
+		checkPayload(t, "baseline", RenderBaseline(cfg, cl, 18, []BaselineRow{{App: "api", Kind: "incident", Summary: "CrashLoopBackOff · database timeout", Since: at(-1300)}, {App: "worker", Kind: "deploy", Summary: "sync failed", Resolved: true}}, rich))
+	}
+	digest := mustJSON(RenderDigest("Daily summary · dev", []DigestRow{{App: "preview-06", Clusters: "dev-use1", For: "3d", Age: 72 * time.Hour, Reason: "image not found", URL: "https://argo/x"}}, Stats{}, true))
+	if !strings.Contains(digest, `"data_table"`) || !strings.Contains(digest, `"mute_open"`) || !strings.Contains(digest, `"value":72`) {
+		t.Errorf("rich digest should be a sortable data table with mute buttons: %s", digest)
+	}
+	inc := &Incident{ID: "i", State: IncidentOpen, Health: "Degraded", FirstUnhealthyAt: at(0), Mention: "<!subteam^S1>"}
+	p := RenderIncident(View{Cfg: cfg, Cluster: cl, App: "api", Rich: true, Now: at(1)}, inc)
+	if !strings.HasPrefix(p.Text, "<!subteam^S1> ") || !strings.Contains(mustJSON(p), `"usergroup_id":"S1"`) {
+		t.Errorf("mention should notify and show: %s", mustJSON(p))
+	}
+	if cfg.IconURL(iconOK) != DefaultIconBaseURL("main")+"/ok.png" {
+		t.Errorf("icon url: %s", cfg.IconURL(iconOK))
+	}
 	home := RenderHome([]HomeCluster{{Name: "dev-use1", Enabled: true, Healthy: 11, Unhealthy: 7, Muted: 1}}, []Mute{*mute}, at(0))
 	if home["type"] != "home" {
 		t.Fatal("home view")

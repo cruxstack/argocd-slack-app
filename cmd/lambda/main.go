@@ -43,6 +43,10 @@ func main() {
 		log.Error("failed to load config", "error", err)
 		os.Exit(1)
 	}
+	// icons come from this release's tag unless the config points elsewhere
+	if strings.HasPrefix(version, "v") && cfg.IconBaseURL == argocdslack.DefaultIconBaseURL("main") {
+		cfg.IconBaseURL = argocdslack.DefaultIconBaseURL(version)
+	}
 	awsCfg, err := config.LoadDefaultConfig(ctx)
 	if err != nil {
 		log.Error("failed to load aws config", "error", err)

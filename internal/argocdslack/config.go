@@ -26,6 +26,7 @@ type Config struct {
 	Links           []Link            `json:"links"`
 	Clusters        []Cluster         `json:"clusters"`
 	Setup           SetupConfig       `json:"setup"`
+	IconBaseURL     string            `json:"icon_base_url"`
 
 	loc *time.Location
 }
@@ -165,6 +166,9 @@ func LoadConfig(raw string) (Config, error) {
 	if c.Setup.Command == "" {
 		c.Setup.Command = "/argocd"
 	}
+	if c.IconBaseURL == "" {
+		c.IconBaseURL = DefaultIconBaseURL("main")
+	}
 
 	var problems []string
 	loc, err := time.LoadLocation(c.Timezone)
@@ -209,6 +213,19 @@ func LoadConfig(raw string) (Config, error) {
 		return c, errors.New("invalid ARGOCD_SLACK_CONFIG: " + strings.Join(problems, "; "))
 	}
 	return c, nil
+}
+
+// DefaultIconBaseURL serves the status icons from this repository at ref.
+func DefaultIconBaseURL(ref string) string {
+	return "https://raw.githubusercontent.com/cruxstack/argocd-slack-app/" + ref + "/assets/status"
+}
+
+// IconURL is the address of a status icon, or "" when icons are off.
+func (c Config) IconURL(name string) string {
+	if c.IconBaseURL == "" || c.IconBaseURL == "none" {
+		return ""
+	}
+	return strings.TrimRight(c.IconBaseURL, "/") + "/" + name + ".png"
 }
 
 // Rich reports whether the newer Block Kit blocks are enabled.
