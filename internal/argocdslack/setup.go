@@ -326,6 +326,10 @@ details { display:grid; gap:12px; }
 .notice { border-left:4px solid var(--ok); padding:10px 14px; background:var(--card); border-radius:6px; }
 .error { border-left:4px solid var(--bad); padding:10px 14px; background:var(--card); border-radius:6px; }
 details summary { cursor:pointer; font-weight:600; }
+h3 { font-size:15px; margin:0; display:flex; gap:8px; align-items:center; }
+.option { display:grid; gap:12px; padding:14px; border:1px solid var(--line); border-radius:8px; }
+.tag { font-size:12px; font-weight:600; color:var(--ok); border:1px solid var(--ok); border-radius:999px; padding:0 8px; }
+.hint { font-size:13px; color:var(--muted); }
 pre { overflow-x:auto; background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:10px; font-size:12px; }
 ol { margin:0; padding-left:20px; display:grid; gap:6px; }
 code { font-size:13px; }
@@ -348,26 +352,37 @@ code { font-size:13px; }
   {{if not .Status.HasApp}}
   <section class="card">
     <h2>Create the app</h2>
-    <p>Paste a Slack app configuration token and this page creates the app with every URL already filled in. Generate one at <a href="https://api.slack.com/apps" target="_blank" rel="noopener">api.slack.com/apps</a> under <b>Your App Configuration Tokens</b>. It's used once and not stored.</p>
-    <form method="post" action="/setup">
-      <input type="hidden" name="csrf" value="{{.CSRF}}">
-      <input type="hidden" name="action" value="create">
-      <label for="config_token">App configuration token
-        <input id="config_token" name="config_token" type="password" autocomplete="off" required placeholder="xoxe.xoxp-…">
-      </label>
-      <p><button type="submit">Create the Slack app</button></p>
-    </form>
-    <details>
-      <summary>Create it yourself instead</summary>
+    <p>Do this in the Slack workspace the bot should post in, with an account that may create apps there. Either way below makes the same app from this deployment's manifest.</p>
+    <div class="option">
+      <h3>Let this page create it <span class="tag">fastest</span></h3>
       <ol>
-        <li><a class="button secondary" href="{{.ManifestURL}}" target="_blank" rel="noopener">Open Slack with this app's manifest</a></li>
-        <li>Pick your workspace and click <b>Create</b>.</li>
-        <li>From <b>Basic Information → App Credentials</b>, paste these:</li>
+        <li>Open <a href="https://api.slack.com/apps" target="_blank" rel="noopener">api.slack.com/apps</a> in a new tab.</li>
+        <li>Below your list of apps, find <b>Your App Configuration Tokens</b> and click <b>Generate Token</b>.</li>
+        <li>Choose the workspace and generate the token.</li>
+        <li>Copy the <b>access token</b> (it starts with <code>xoxe.xoxp-</code>), not the refresh token, and paste it here.</li>
+      </ol>
+      <form method="post" action="/setup">
+        <input type="hidden" name="csrf" value="{{.CSRF}}">
+        <input type="hidden" name="action" value="create">
+        <label for="config_token">Access token
+          <input id="config_token" name="config_token" type="password" autocomplete="off" required placeholder="xoxe.xoxp-…">
+        </label>
+        <p><button type="submit">Create the Slack app</button></p>
+      </form>
+      <p class="hint">The token is used once, right now, and isn't saved; it expires by itself after 12 hours. Generating it adds Slack's own <i>Slack Tooling Tokens Vendor</i> app to the workspace, which is expected.</p>
+    </div>
+    <details>
+      <summary>Can't generate a token? Create the app yourself instead</summary>
+      <ol>
+        <li><a class="button secondary" href="{{.ManifestURL}}" target="_blank" rel="noopener">Open Slack with this app's manifest</a><br><span class="hint">Slack's <b>Create an app</b> page opens in a new tab with everything filled in.</span></li>
+        <li>Choose the workspace, click <b>Next</b>, check the summary, and click <b>Create</b>.</li>
+        <li>On the new app's <b>Basic Information</b> page, under <b>App Credentials</b>, copy the <b>Client ID</b>. Click <b>Show</b> next to <b>Client Secret</b> and <b>Signing Secret</b> and copy those too.</li>
+        <li>Paste all three here and click <b>Save credentials</b>.</li>
       </ol>
       <form method="post" action="/setup">
         <input type="hidden" name="csrf" value="{{.CSRF}}">
         <input type="hidden" name="action" value="credentials">
-        <label for="client_id">Client ID <input id="client_id" name="client_id" autocomplete="off" required></label>
+        <label for="client_id">Client ID <input id="client_id" name="client_id" autocomplete="off" required placeholder="1234567890.1234567890"></label>
         <label for="client_secret">Client Secret <input id="client_secret" name="client_secret" type="password" autocomplete="off" required></label>
         <label for="signing_secret">Signing Secret <input id="signing_secret" name="signing_secret" type="password" autocomplete="off" required></label>
         <p><button type="submit">Save credentials</button></p>
@@ -377,12 +392,18 @@ code { font-size:13px; }
       <summary>See the manifest</summary>
       <pre>{{.ManifestJSON}}</pre>
     </details>
+    <p class="hint">Next you'll install the app, which takes one click in Slack.</p>
   </section>
   {{else if not .Status.Installed}}
   <section class="card">
     <h2>Install it in your workspace</h2>
-    <p>The app exists. Install it to give it a bot token. Slack shows what it can do: post and edit its own messages, the <code>{{.Command}}</code> command, and reading history in channels it's invited to.</p>
+    <ol>
+      <li>Click <b>Install to Slack</b>. Slack lists what the app may do: post and edit its own messages, add the <code>{{.Command}}</code> command, and read history in channels it's invited to.</li>
+      <li>Check the workspace in the top right of Slack's page and click <b>Allow</b>.</li>
+      <li>Slack sends you back here when it's done.</li>
+    </ol>
     <p><a class="button" href="{{.InstallURL}}">Install to Slack</a></p>
+    <p class="hint">If your workspace needs an admin to approve new apps, Slack offers to request approval instead. Once an admin approves, come back to this page and click <b>Install to Slack</b> again.</p>
   </section>
   {{else}}
   <section class="card">
