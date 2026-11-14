@@ -54,6 +54,7 @@ type memStore struct {
 	mvers map[string]int64
 	mutes map[string]Mute
 	once  map[string]bool
+	locks map[string]bool
 	lease string
 }
 
@@ -167,6 +168,26 @@ func (m *memStore) ReleaseLease(_ context.Context, owner string) error {
 	if m.lease == owner {
 		m.lease = ""
 	}
+	return nil
+}
+
+func (m *memStore) TryLock(_ context.Context, name string, _ time.Duration, _ time.Time) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.locks == nil {
+		m.locks = map[string]bool{}
+	}
+	if m.locks[name] {
+		return false, nil
+	}
+	m.locks[name] = true
+	return true, nil
+}
+
+func (m *memStore) Unlock(_ context.Context, name string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.locks, name)
 	return nil
 }
 
