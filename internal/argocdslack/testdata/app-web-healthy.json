@@ -1,0 +1,77 @@
+{
+  "apiVersion": "argoproj.io/v1alpha1",
+  "kind": "Application",
+  "metadata": {
+    "name": "web",
+    "namespace": "argocd",
+    "resourceVersion": "1001",
+    "annotations": {
+      "example.com/repo": "acme/web",
+      "example.com/commit": "c3d4e5fa1b2c3d4e5f60718293a4b5c6d7e8f901",
+      "example.com/title": "feat: render the pricing page on the server"
+    }
+  },
+  "spec": {
+    "project": "default",
+    "source": {
+      "repoURL": "https://github.com/acme/gitops.git",
+      "path": "apps/web",
+      "targetRevision": "HEAD"
+    },
+    "destination": {
+      "server": "https://kubernetes.default.svc",
+      "namespace": "web"
+    }
+  },
+  "status": {
+    "health": {
+      "status": "Healthy",
+      "lastTransitionTime": "2026-11-14T09:14:53Z"
+    },
+    "sync": {
+      "status": "Synced",
+      "revision": "9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b"
+    },
+    "summary": {
+      "images": [
+        "111122223333.dkr.ecr.us-east-1.amazonaws.com/web:v2.8.0"
+      ]
+    },
+    "resources": [
+      {
+        "group": "apps",
+        "kind": "Deployment",
+        "namespace": "web",
+        "name": "web",
+        "version": "v1",
+        "status": "Synced"
+      },
+      {
+        "group": "",
+        "kind": "Service",
+        "namespace": "web",
+        "name": "web",
+        "version": "v1",
+        "status": "Synced"
+      }
+    ],
+    "operationState": {
+      "phase": "Succeeded",
+      "message": "successfully synced (all tasks run)",
+      "startedAt": "2026-11-13T22:04:11Z",
+      "operation": {
+        "initiatedBy": {
+          "automated": true
+        },
+        "sync": {
+          "revision": "9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b"
+        }
+      },
+      "syncResult": {
+        "revision": "9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b",
+        "resources": []
+      },
+      "finishedAt": "2026-11-13T22:04:16Z"
+    }
+  }
+}

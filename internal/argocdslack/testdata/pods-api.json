@@ -1,0 +1,78 @@
+{
+  "items": [
+    {
+      "metadata": {
+        "name": "api-server-7d9f6c5b4-x2k9p",
+        "namespace": "apps"
+      },
+      "spec": {
+        "containers": [
+          {
+            "name": "server",
+            "image": "111122223333.dkr.ecr.us-east-1.amazonaws.com/api:v1.4.2"
+          }
+        ]
+      },
+      "status": {
+        "phase": "Running",
+        "containerStatuses": [
+          {
+            "name": "server",
+            "image": "111122223333.dkr.ecr.us-east-1.amazonaws.com/api:v1.4.2",
+            "ready": false,
+            "restartCount": 7,
+            "state": {
+              "waiting": {
+                "reason": "CrashLoopBackOff",
+                "message": "back-off 5m0s restarting failed container=server pod=api-server-7d9f6c5b4-x2k9p"
+              }
+            },
+            "lastState": {
+              "terminated": {
+                "reason": "Error",
+                "exitCode": 1
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "metadata": {
+        "name": "api-server-7d9f6c5b4-q8m4v",
+        "namespace": "apps"
+      },
+      "spec": {
+        "containers": [
+          {
+            "name": "server",
+            "image": "111122223333.dkr.ecr.us-east-1.amazonaws.com/api:v1.4.2"
+          }
+        ]
+      },
+      "status": {
+        "phase": "Running",
+        "containerStatuses": [
+          {
+            "name": "server",
+            "image": "111122223333.dkr.ecr.us-east-1.amazonaws.com/api:v1.4.2",
+            "ready": false,
+            "restartCount": 7,
+            "state": {
+              "waiting": {
+                "reason": "CrashLoopBackOff",
+                "message": "back-off 5m0s restarting failed container=server pod=api-server-7d9f6c5b4-q8m4v"
+              }
+            },
+            "lastState": {
+              "terminated": {
+                "reason": "Error",
+                "exitCode": 1
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

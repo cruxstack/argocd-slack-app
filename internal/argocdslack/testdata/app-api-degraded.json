@@ -1,0 +1,85 @@
+{
+  "apiVersion": "argoproj.io/v1alpha1",
+  "kind": "Application",
+  "metadata": {
+    "name": "api",
+    "namespace": "argocd",
+    "resourceVersion": "1001",
+    "annotations": {
+      "example.com/repo": "acme/api",
+      "example.com/commit": "4f1c2d9e8b7a6f5e4d3c2b1a0f9e8d7c6b5a4f3e"
+    }
+  },
+  "spec": {
+    "project": "default",
+    "source": {
+      "repoURL": "https://github.com/acme/gitops.git",
+      "path": "apps/api",
+      "targetRevision": "HEAD"
+    },
+    "destination": {
+      "server": "https://kubernetes.default.svc",
+      "namespace": "apps"
+    }
+  },
+  "status": {
+    "health": {
+      "status": "Degraded",
+      "message": "Caused by apps/Deployment:apps/api-server",
+      "lastTransitionTime": "2026-11-13T17:09:33Z"
+    },
+    "sync": {
+      "status": "Synced",
+      "revision": "9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b"
+    },
+    "summary": {
+      "images": [
+        "111122223333.dkr.ecr.us-east-1.amazonaws.com/api:v1.4.2"
+      ]
+    },
+    "resources": [
+      {
+        "group": "apps",
+        "kind": "Deployment",
+        "namespace": "apps",
+        "name": "api-server",
+        "version": "v1",
+        "status": "Synced"
+      },
+      {
+        "group": "",
+        "kind": "Service",
+        "namespace": "apps",
+        "name": "api-server",
+        "version": "v1",
+        "status": "Synced"
+      },
+      {
+        "group": "autoscaling",
+        "kind": "HorizontalPodAutoscaler",
+        "namespace": "apps",
+        "name": "api-server",
+        "version": "v1",
+        "status": "Synced"
+      }
+    ],
+    "operationState": {
+      "phase": "Succeeded",
+      "message": "successfully synced (all tasks run)",
+      "startedAt": "2026-11-13T16:59:18Z",
+      "operation": {
+        "initiatedBy": {
+          "automated": true
+        },
+        "sync": {
+          "revision": "9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b"
+        }
+      },
+      "syncResult": {
+        "revision": "9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b",
+        "resources": []
+      },
+      "finishedAt": "2026-11-13T16:59:30Z"
+    }
+  }
+}

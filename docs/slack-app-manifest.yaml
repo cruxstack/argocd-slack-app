@@ -1,0 +1,39 @@
+# Replace REPLACE with the API Gateway host after the first deploy.
+_metadata:
+  major_version: 2
+  minor_version: 1
+display_information:
+  name: Argo CD
+  description: Deploys and incidents from Argo CD, one message each.
+  background_color: "#2b2f36"
+features:
+  app_home:
+    home_tab_enabled: true
+    messages_tab_enabled: false
+  bot_user:
+    display_name: Argo CD
+    always_online: true
+  slash_commands:
+    - command: /argocd
+      url: https://REPLACE/slack/commands
+      description: Mute, unmute and check Argo CD apps
+      usage_hint: "mute api@prod-use1 4h reason | mutes | unmute api@prod-use1 | status api"
+      should_escape: false
+oauth_config:
+  scopes:
+    bot:
+      - chat:write
+      - commands
+      - channels:history
+      - usergroups:read
+settings:
+  event_subscriptions:
+    request_url: https://REPLACE/slack/events
+    bot_events:
+      - app_home_opened
+  interactivity:
+    is_enabled: true
+    request_url: https://REPLACE/slack/interactivity
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false

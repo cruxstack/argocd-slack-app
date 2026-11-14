@@ -1,0 +1,40 @@
+{
+  "items": [
+    {
+      "type": "Warning",
+      "reason": "Unhealthy",
+      "count": 533,
+      "lastTimestamp": "2026-11-14T14:40:00Z",
+      "message": "Startup probe failed: Get \"http://10.0.1.23:8080/healthz\": dial tcp 10.0.1.23:8080: connect: connection refused",
+      "involvedObject": {
+        "kind": "Pod",
+        "name": "api-server-7d9f6c5b4-x2k9p",
+        "namespace": "apps"
+      }
+    },
+    {
+      "type": "Normal",
+      "reason": "Pulled",
+      "count": 259,
+      "lastTimestamp": "2026-11-14T14:39:00Z",
+      "message": "Container image \"111122223333.dkr.ecr.us-east-1.amazonaws.com/api:v1.4.2\" already present on machine",
+      "involvedObject": {
+        "kind": "Pod",
+        "name": "api-server-7d9f6c5b4-x2k9p",
+        "namespace": "apps"
+      }
+    },
+    {
+      "type": "Warning",
+      "reason": "BackOff",
+      "count": 1405,
+      "lastTimestamp": "2026-11-14T14:41:00Z",
+      "message": "Back-off restarting failed container server in pod api-server-7d9f6c5b4-x2k9p_apps",
+      "involvedObject": {
+        "kind": "Pod",
+        "name": "api-server-7d9f6c5b4-x2k9p",
+        "namespace": "apps"
+      }
+    }
+  ]
+}

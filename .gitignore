@@ -1,0 +1,14 @@
+# build output
+dist/
+release/
+coverage.out
+
+# local settings and secrets
+.env
+.local/
+tmp/
+
+# worktrees
+.worktrees/
+
+.DS_Store

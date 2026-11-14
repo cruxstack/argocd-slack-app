@@ -1,0 +1,73 @@
+{
+  "apiVersion": "argoproj.io/v1alpha1",
+  "kind": "Application",
+  "metadata": {
+    "name": "worker",
+    "namespace": "argocd",
+    "resourceVersion": "1001",
+    "annotations": {
+      "example.com/repo": "acme/worker",
+      "example.com/commit": "0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e"
+    }
+  },
+  "spec": {
+    "project": "default",
+    "source": {
+      "repoURL": "https://github.com/acme/gitops.git",
+      "path": "apps/worker",
+      "targetRevision": "HEAD"
+    },
+    "destination": {
+      "server": "https://kubernetes.default.svc",
+      "namespace": "jobs"
+    }
+  },
+  "status": {
+    "health": {
+      "status": "Missing",
+      "lastTransitionTime": "2026-11-13T16:59:18Z"
+    },
+    "sync": {
+      "status": "Synced",
+      "revision": "9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b"
+    },
+    "summary": {
+      "images": []
+    },
+    "resources": [
+      {
+        "group": "apps",
+        "kind": "Deployment",
+        "namespace": "jobs",
+        "name": "worker",
+        "version": "v1",
+        "status": "Synced"
+      },
+      {
+        "group": "batch",
+        "kind": "Job",
+        "namespace": "jobs",
+        "name": "worker-migrate",
+        "version": "v1",
+        "status": "Synced"
+      }
+    ],
+    "operationState": {
+      "phase": "Running",
+      "message": "waiting for completion of hook batch/Job/worker-migrate",
+      "startedAt": "2026-11-14T14:39:18Z",
+      "operation": {
+        "initiatedBy": {
+          "automated": true
+        },
+        "sync": {
+          "revision": "9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b"
+        }
+      },
+      "syncResult": {
+        "revision": "9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b",
+        "resources": []
+      }
+    }
+  }
+}
