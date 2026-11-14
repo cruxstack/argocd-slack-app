@@ -215,7 +215,7 @@ func (a *App) command(ctx context.Context, form url.Values, now time.Time) event
 			return ephemeral("Couldn't save the mute: " + err.Error())
 		}
 		a.async(ctx, Job{Job: "mute_created", Mute: &m, Channel: channel, User: user})
-		return ephemeral(fmt.Sprintf("🔕 Muted %s (%s) %s. Undo with `/argocd unmute %s`.", m.Scope(), strings.Join(m.Kinds, ", "), m.UntilText(), m.ID))
+		return ephemeral(fmt.Sprintf("Muted %s (%s) %s. Undo with `/argocd unmute %s`.", m.Scope(), strings.Join(m.Kinds, ", "), m.UntilText(), m.ID))
 	case "mutes":
 		mutes, err := a.Store.Mutes(ctx)
 		if err != nil {
@@ -252,7 +252,7 @@ func (a *App) command(ctx context.Context, form url.Values, now time.Time) event
 		if len(ended) == 0 {
 			return ephemeral("No active mute matches `" + target + "`. See `/argocd mutes`.")
 		}
-		return ephemeral("🔔 Unmuted " + strings.Join(ended, ", ") + ".")
+		return ephemeral("Unmuted " + strings.Join(ended, ", ") + ".")
 	case "status":
 		return ephemeral(a.statusText(ctx, args[1:]))
 	case "demo":
@@ -491,7 +491,7 @@ func (a *App) Ack(ctx context.Context, job Job) error {
 			return err
 		}
 		rec.Incident.AckBy = job.User
-		rec.Incident.Timeline = append(rec.Incident.Timeline, entry(a.now(), "👀 <@%s> is on it.", job.User))
+		rec.Incident.Timeline = append(rec.Incident.Timeline, quietEntry(a.now(), "<@%s> is on it.", job.User))
 		mutes, _ := a.Store.Mutes(ctx)
 		a.Rerender(ctx, cl, rec, mutes)
 		err = a.Store.SaveRecord(ctx, rec)
@@ -509,7 +509,7 @@ func (a *App) muteCreated(ctx context.Context, job Job) error {
 		return nil
 	}
 	if job.Channel != "" {
-		_ = a.Slack.Ephemeral(ctx, job.Channel, job.User, fmt.Sprintf("🔕 Muted %s (%s) %s. Undo with `/argocd unmute %s`.", m.Scope(), strings.Join(m.Kinds, ", "), m.UntilText(), m.ID))
+		_ = a.Slack.Ephemeral(ctx, job.Channel, job.User, fmt.Sprintf("Muted %s (%s) %s. Undo with `/argocd unmute %s`.", m.Scope(), strings.Join(m.Kinds, ", "), m.UntilText(), m.ID))
 	}
 	if m.Wide() {
 		channels := map[string]bool{}
@@ -519,7 +519,7 @@ func (a *App) muteCreated(ctx context.Context, job Job) error {
 			}
 		}
 		for ch := range channels {
-			text := fmt.Sprintf("🔕 <@%s> muted %s (%s) %s.", m.By, m.Scope(), strings.Join(m.Kinds, ", "), m.UntilText())
+			text := fmt.Sprintf("<@%s> muted %s (%s) %s.", m.By, m.Scope(), strings.Join(m.Kinds, ", "), m.UntilText())
 			if m.Reason != "" {
 				text += " " + m.Reason
 			}

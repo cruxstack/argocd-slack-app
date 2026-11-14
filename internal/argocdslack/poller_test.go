@@ -88,8 +88,8 @@ func TestPollEndToEnd(t *testing.T) {
 			threads++
 		}
 	}
-	if threads != 2 {
-		t.Fatalf("want 2 silent thread replies on the incident, got %d", threads)
+	if threads != 0 {
+		t.Fatalf("the message shows how the incident opened, so its thread stays empty; got %d replies", threads)
 	}
 
 	// Many more polls while still degraded: no new top-level messages.

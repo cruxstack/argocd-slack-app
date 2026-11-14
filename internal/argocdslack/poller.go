@@ -406,7 +406,7 @@ func (w *worker) unreachable(ctx context.Context, cause error) {
 		w.meta.FailingSince = now
 	}
 	if now.Sub(w.meta.FailingSince) >= 5*time.Minute && !w.meta.Unreachable.Posted() {
-		text := fmt.Sprintf("⚠️ Can't read Argo CD on *%s* since %s, so its notifications are paused. `%s`",
+		text := fmt.Sprintf("Can't read Argo CD on *%s* since %s, so its notifications are paused. `%s`",
 			w.cl.Name, slackTime(w.meta.FailingSince, "{time}"), trimTo(Redact(cause.Error()), 200))
 		if msg, err := w.a.Slack.Post(ctx, Payload{Channel: w.a.Cfg.ChannelFor(w.cl), Text: text}); err == nil {
 			w.meta.Unreachable = msg
@@ -417,7 +417,7 @@ func (w *worker) unreachable(ctx context.Context, cause error) {
 
 func (w *worker) reachable(ctx context.Context) {
 	if w.meta.Unreachable.Posted() {
-		text := fmt.Sprintf("✅ Reading Argo CD on *%s* again after %s.", w.cl.Name, short(w.a.now().Sub(w.meta.FailingSince)))
+		text := fmt.Sprintf("Reading Argo CD on *%s* again after %s.", w.cl.Name, short(w.a.now().Sub(w.meta.FailingSince)))
 		_ = w.a.Slack.Update(ctx, Payload{Channel: w.meta.Unreachable.Channel, TS: w.meta.Unreachable.TS, Text: text})
 		w.meta.Unreachable = Message{}
 	}
@@ -451,7 +451,7 @@ func (a *App) expireMutes(ctx context.Context, mutes []Mute, now time.Time) []Mu
 			continue
 		}
 		if m.Wide() && m.Announced.Posted() {
-			_, _ = a.Slack.Post(ctx, Payload{Channel: m.Announced.Channel, ThreadTS: m.Announced.TS, Text: fmt.Sprintf("🔔 Mute on %s ended.", m.Scope())})
+			_, _ = a.Slack.Post(ctx, Payload{Channel: m.Announced.Channel, ThreadTS: m.Announced.TS, Text: fmt.Sprintf("Mute on %s ended.", m.Scope())})
 		}
 	}
 	return active

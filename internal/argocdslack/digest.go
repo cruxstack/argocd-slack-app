@@ -80,7 +80,7 @@ func (a *App) Digest(ctx context.Context) error {
 				it.age = age
 			}
 			if m := FindMute(mutes, cl, rec.App, KindIncidents, now); m != nil {
-				it.row.Note = "🔕 " + m.UntilText()
+				it.row.Note = "muted " + m.UntilText()
 			} else if a.Cfg.IsPreview(rec.App) && age >= a.Cfg.Grace.PreviewCleanup.Duration {
 				it.row.Note = "cleanup?"
 			}

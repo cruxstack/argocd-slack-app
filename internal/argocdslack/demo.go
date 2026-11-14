@@ -130,10 +130,10 @@ func DemoIntro(cfg Config, st *DemoState, done bool) string {
 		what = "the " + strings.Join(st.Stories, ", ") + " demo plays out with made-up apps on a `" + DemoCluster + "` cluster"
 	}
 	if done {
-		return fmt.Sprintf("🎬 *Argo CD demo* by <@%s> is done. Play it again with `%s demo`, or one story with `%s demo %s`.",
+		return fmt.Sprintf("*Argo CD demo* by <@%s> is done. Play it again with `%s demo`, or one story with `%s demo %s`.",
 			st.User, cfg.Setup.Command, cfg.Setup.Command, strings.Join(demoOrder, "|"))
 	}
-	return fmt.Sprintf("🎬 *Argo CD demo* started by <@%s>. Over the next couple of minutes %s in the messages below, each one updating in place. Buttons and links don't act on anything real.",
+	return fmt.Sprintf("*Argo CD demo* started by <@%s>. Over the next couple of minutes %s in the messages below, each one updating in place. Buttons and links don't act on anything real.",
 		st.User, what)
 }
 
@@ -465,7 +465,7 @@ func (w *worker) demoFrame(ctx context.Context, st *DemoState, f demoFrame) {
 		}
 		if inc := rec.Incident; inc != nil && inc.State == IncidentOpen && inc.AckBy == "" && slices.Contains(f.Acks, app) {
 			inc.AckBy, inc.Dirty = st.User, true
-			inc.Timeline = append(inc.Timeline, entry(now, "👀 <@%s> is on it.", st.User))
+			inc.Timeline = append(inc.Timeline, quietEntry(now, "<@%s> is on it.", st.User))
 		}
 		if f.Baseline {
 			w.collectBaseline(rec)

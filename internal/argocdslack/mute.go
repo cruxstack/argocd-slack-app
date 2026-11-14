@@ -83,7 +83,7 @@ func (m Mute) UntilText() string {
 
 // Note is the context line shown on muted messages.
 func (m Mute) Note() string {
-	s := fmt.Sprintf("🔕 Muted %s by <@%s>", m.UntilText(), m.By)
+	s := fmt.Sprintf("Muted %s by <@%s>", m.UntilText(), m.By)
 	if m.Reason != "" {
 		s += ": " + m.Reason
 	}

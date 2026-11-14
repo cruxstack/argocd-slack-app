@@ -79,8 +79,8 @@ func TestDemoPlaysEveryStory(t *testing.T) {
 	want := []string{
 		"Argo CD demo* by <@U9> is done",
 		"Now watching demo · 1 of 10 apps is still unhealthy",
-		"checkout-api deployed to demo · 2m 20s",
-		"payments-worker deploy failed on demo",
+		"checkout-api deployed to demo in 2m 20s",
+		"payments-worker failed to deploy to demo",
 		"search-indexer recovered on demo",
 		"web-frontend recovered on demo",
 		"payments-worker deployed to demo",
@@ -96,13 +96,14 @@ func TestDemoPlaysEveryStory(t *testing.T) {
 	}
 
 	all := strings.NewReplacer(`\u003c`, "<", `\u003e`, ">").Replace(mustJSON(slack.updates))
-	for _, w := range []string{"flapped 1×", "Muted until healthy by <@U9>", "<@U9> is on it", "Roll out 2/3 pods", "Fixed by the", "legacy-reports* recovered", "OOMKilled"} {
+	for _, w := range []string{"flapped 1×", "Muted until healthy by <@U9>", "<@U9> is on it", "Roll out 2/3 pods", "Fixed by the", "legacy-reports recovered at", "OOMKilled"} {
 		if !strings.Contains(all, w) {
 			t.Errorf("no update shows %q", w)
 		}
 	}
-	if threads := len(slack.posts) - len(order); threads < 10 {
-		t.Errorf("want timeline replies in threads, got %d", threads)
+	// Only the flapping incident has history worth a thread.
+	if threads := len(slack.posts) - len(order); threads != 2 {
+		t.Errorf("want 2 thread replies (flap and recovery), got %d", threads)
 	}
 }
 
