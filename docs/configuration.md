@@ -21,6 +21,7 @@ Invalid config stops the function at startup with every problem listed.
 | `links`            | `[]`                                        | Buttons on every message; see below.                                                              |
 | `grace`            | see below                                   | Timing rules.                                                                                     |
 | `clusters`         | required                                    | The Argo CD instances to watch.                                                                   |
+| `setup`            | off                                         | The web installer; see below.                                                                     |
 
 ## Timing rules (`grace`)
 
@@ -96,3 +97,17 @@ limited to 4 KB in total.
 When a cluster is enabled it posts one baseline message listing apps that are
 already unhealthy, instead of one alert each. Moving it to another channel, or
 leaving dry run, posts a fresh baseline.
+
+## Installer (`setup`)
+
+| Field      | Default   | Meaning                                                                          |
+| ---------- | --------- | -------------------------------------------------------------------------------- |
+| `enabled`  | `false`   | Serve `/setup` and the OAuth install. Turn it on for the first deploy only.      |
+| `app_name` | `Argo CD` | The Slack app's and bot's display name in the manifest.                          |
+| `command`  | `/argocd` | The slash command in the manifest.                                               |
+| `base_url` | request   | Public base URL for the manifest's request URLs, if not the API Gateway host.    |
+
+The installer writes `SLACK_SIGNING_SECRET`, `SLACK_CLIENT_ID`,
+`SLACK_CLIENT_SECRET`, `SLACK_BOT_TOKEN` and `SLACK_TEAM` to the SSM parameters
+those environment variables name, so the function needs `ssm:PutParameter` on
+them while it's on.

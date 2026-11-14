@@ -24,13 +24,15 @@ type ClusterAPI interface {
 
 // App wires config, storage, Slack and cluster access together.
 type App struct {
-	Cfg     Config
-	Store   Store
-	Slack   Slack
-	Log     *slog.Logger
-	Connect func(ctx context.Context, cl Cluster) (ClusterAPI, error)
-	Invoke  func(ctx context.Context, job Job) error
-	Now     func() time.Time
+	Cfg      Config
+	Store    Store
+	Slack    Slack
+	Log      *slog.Logger
+	Connect  func(ctx context.Context, cl Cluster) (ClusterAPI, error)
+	Invoke   func(ctx context.Context, job Job) error
+	Now      func() time.Time
+	Secrets  Secrets
+	SetupAPI SetupAPI
 
 	richOff atomic.Bool
 }

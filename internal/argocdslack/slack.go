@@ -12,7 +12,9 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 )
@@ -170,4 +172,109 @@ func VerifySignature(secret, timestamp, signature string, body []byte, now time.
 		return errors.New("bad Slack signature")
 	}
 	return nil
+}
+
+// SetupAPI creates the Slack app from its manifest and finishes the OAuth
+// install. These calls ignore DryRun: setup always talks to Slack.
+type SetupAPI interface {
+	CreateApp(ctx context.Context, configToken string, manifest any) (CreatedApp, error)
+	ExchangeCode(ctx context.Context, clientID, clientSecret, code, redirectURI string) (Installation, error)
+}
+
+// CreatedApp is what apps.manifest.create returns.
+type CreatedApp struct {
+	AppID         string
+	ClientID      string
+	ClientSecret  string
+	SigningSecret string
+}
+
+// Installation is what oauth.v2.access returns for a bot install.
+type Installation struct {
+	BotToken  string
+	TeamID    string
+	TeamName  string
+	AppID     string
+	BotUserID string
+}
+
+func (c *SlackClient) raw(ctx context.Context, method, contentType, bearer string, body []byte, out any) error {
+	hc := c.HTTP
+	if hc == nil {
+		hc = &http.Client{Timeout: 15 * time.Second}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base()+method, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", contentType)
+	if bearer != "" {
+		req.Header.Set("Authorization", "Bearer "+bearer)
+	}
+	resp, err := hc.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to call %s: %w", method, err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	var res struct {
+		OK     bool   `json:"ok"`
+		Error  string `json:"error"`
+		Errors []struct {
+			Message string `json:"message"`
+			Pointer string `json:"pointer"`
+		} `json:"errors"`
+	}
+	if err := json.Unmarshal(b, &res); err != nil {
+		return fmt.Errorf("failed to read %s response: %s", method, resp.Status)
+	}
+	if !res.OK {
+		code := res.Error
+		for _, e := range res.Errors {
+			code += "; " + e.Pointer + ": " + e.Message
+		}
+		return &SlackError{Method: method, Code: code}
+	}
+	return json.Unmarshal(b, out)
+}
+
+func (c *SlackClient) CreateApp(ctx context.Context, configToken string, manifest any) (CreatedApp, error) {
+	m, err := json.Marshal(manifest)
+	if err != nil {
+		return CreatedApp{}, err
+	}
+	body, _ := json.Marshal(map[string]string{"manifest": string(m)})
+	var out struct {
+		AppID       string `json:"app_id"`
+		Credentials struct {
+			ClientID      string `json:"client_id"`
+			ClientSecret  string `json:"client_secret"`
+			SigningSecret string `json:"signing_secret"`
+		} `json:"credentials"`
+	}
+	if err := c.raw(ctx, "apps.manifest.create", "application/json; charset=utf-8", configToken, body, &out); err != nil {
+		return CreatedApp{}, err
+	}
+	return CreatedApp{AppID: out.AppID, ClientID: out.Credentials.ClientID, ClientSecret: out.Credentials.ClientSecret, SigningSecret: out.Credentials.SigningSecret}, nil
+}
+
+func (c *SlackClient) ExchangeCode(ctx context.Context, clientID, clientSecret, code, redirectURI string) (Installation, error) {
+	form := url.Values{"client_id": {clientID}, "client_secret": {clientSecret}, "code": {code}, "redirect_uri": {redirectURI}}
+	var out struct {
+		AccessToken string `json:"access_token"`
+		TokenType   string `json:"token_type"`
+		AppID       string `json:"app_id"`
+		BotUserID   string `json:"bot_user_id"`
+		Team        struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"team"`
+	}
+	if err := c.raw(ctx, "oauth.v2.access", "application/x-www-form-urlencoded", "", []byte(form.Encode()), &out); err != nil {
+		return Installation{}, err
+	}
+	if out.TokenType != "bot" || !strings.HasPrefix(out.AccessToken, "xoxb-") {
+		return Installation{}, errors.New("slack did not return a bot token")
+	}
+	return Installation{BotToken: out.AccessToken, TeamID: out.Team.ID, TeamName: out.Team.Name, AppID: out.AppID, BotUserID: out.BotUserID}, nil
 }
