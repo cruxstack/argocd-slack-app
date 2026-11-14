@@ -214,7 +214,7 @@ type fakeSlack struct {
 func (f *fakeSlack) Post(_ context.Context, p Payload) (Message, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.rejectRich && strings.Contains(mustJSON(p), `"plan"`) {
+	if f.rejectRich && strings.Contains(mustJSON(p), `"container"`) {
 		return Message{}, &SlackError{Method: "chat.postMessage", Code: "invalid_blocks"}
 	}
 	f.n++

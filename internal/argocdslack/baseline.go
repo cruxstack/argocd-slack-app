@@ -74,7 +74,7 @@ func (w *worker) baselineProgress(rec *AppRecord) {
 
 func (w *worker) postBaseline(ctx context.Context, total int) {
 	channel := w.a.Cfg.ChannelFor(w.cl)
-	render := func(bool) Payload { return RenderBaseline(w.cl, total, w.meta.BaselineRows) }
+	render := func(rich bool) Payload { return RenderBaseline(w.a.Cfg, w.cl, total, w.meta.BaselineRows, rich) }
 	msg, err := w.post(ctx, channel, render)
 	if err != nil {
 		w.a.Log.Error("post baseline", "cluster", w.cl.Name, "error", err)
@@ -90,7 +90,7 @@ func (w *worker) updateBaseline(ctx context.Context) {
 		return
 	}
 	total := len(w.snaps)
-	render := func(bool) Payload { return RenderBaseline(w.cl, total, w.meta.BaselineRows) }
+	render := func(rich bool) Payload { return RenderBaseline(w.a.Cfg, w.cl, total, w.meta.BaselineRows, rich) }
 	if err := w.update(ctx, w.meta.Baseline, render); err != nil {
 		w.a.Log.Error("update baseline", "cluster", w.cl.Name, "error", err)
 		return
