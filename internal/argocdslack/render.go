@@ -36,14 +36,6 @@ type Metadata struct {
 	EventPayload map[string]any `json:"event_payload"`
 }
 
-const (
-	colorOK   = "#2EB67D"
-	colorBad  = "#E01E5A"
-	colorRun  = "#36C5F0"
-	colorWarn = "#ECB22E"
-	colorMute = "#9A9B9E"
-)
-
 // View holds what a render needs beyond the record itself.
 type View struct {
 	Cfg       Config
@@ -57,8 +49,13 @@ type View struct {
 
 func mrkdwn(t string) Block { return Block{"type": "mrkdwn", "text": t} }
 func plain(t string) Block  { return Block{"type": "plain_text", "text": trimTo(t, 75), "emoji": true} }
+
+// section keeps line breaks, unlike trimTo, and stays under Slack's limit.
 func section(t string) Block {
-	return Block{"type": "section", "text": mrkdwn(trimTo(t, 2900))}
+	if r := []rune(t); len(r) > 2900 {
+		t = string(r[:2899]) + "…"
+	}
+	return Block{"type": "section", "text": mrkdwn(t)}
 }
 
 func contextBlock(parts ...string) Block {
@@ -72,13 +69,6 @@ func contextBlock(parts ...string) Block {
 		return nil
 	}
 	return Block{"type": "context", "elements": els}
-}
-
-func urlButton(text, url, actionID string) Block {
-	if url == "" {
-		return nil
-	}
-	return Block{"type": "button", "text": plain(text), "url": url, "action_id": actionID}
 }
 
 func button(text, actionID, value, style string) Block {
@@ -121,166 +111,133 @@ func linkedApp(cl Cluster, app string) string {
 	return "*" + app + "*"
 }
 
-// headlined puts the title in the message's own blocks, where Slack shows it
-// once, and the details in a colored attachment below it. With attachments
-// alone Slack shows the text above them, which repeated the title.
-func headlined(text, title, color string, details []Block, meta *Metadata) Payload {
-	p := Payload{Text: text, Blocks: []Block{section(title)}, Metadata: meta}
-	if details = compact(details...); len(details) > 0 {
-		p.Attachments = []Attachment{{Color: color, Fallback: text, Blocks: details}}
-	}
-	return p
-}
-
 func value(parts ...string) string { return strings.Join(parts, "|") }
 
-func envLine(cl Cluster) string { return cl.Env + " · " + shortRegion(cl.Region) }
-
-// shortRegion turns us-east-1 into use1 and eu-central-1 into euc1.
-func shortRegion(region string) string {
-	parts := strings.Split(region, "-")
-	if len(parts) != 3 {
-		return region
+func moreMenu(v View, kind string) Block {
+	var opts []Block
+	if u := v.Cluster.AppURL(v.App); u != "" {
+		opts = append(opts, Block{"text": plain("Open in Argo CD"), "value": value("open", v.Cluster.Name, v.App), "url": u})
 	}
-	dir := map[string]string{"east": "e", "west": "w", "north": "n", "south": "s", "central": "c",
-		"northeast": "ne", "northwest": "nw", "southeast": "se", "southwest": "sw"}[parts[1]]
-	if dir == "" {
-		return region
-	}
-	return parts[0] + dir + parts[2]
-}
-
-func moreMenu(v View, kind string, extra ...Block) Block {
-	opts := []Block{{"text": plain("Mute…"), "value": value("mute", v.Cluster.Name, v.App, kind)}}
-	opts = append(opts, extra...)
+	opts = append(opts, Block{"text": plain("Mute…"), "value": value("mute", v.Cluster.Name, v.App, kind)})
 	return Block{"type": "overflow", "action_id": "more", "options": opts}
 }
 
-// RenderDeploy draws one deploy message.
+func headline(title string, accessory Block) Block {
+	b := section(title)
+	if accessory != nil {
+		b["accessory"] = accessory
+	}
+	return b
+}
+
+// dot joins the non-empty parts with a middle dot.
+func dot(parts ...string) string {
+	var keep []string
+	for _, p := range parts {
+		if strings.TrimSpace(p) != "" {
+			keep = append(keep, p)
+		}
+	}
+	return strings.Join(keep, " · ")
+}
+
+// linkText is the app's links as quiet text rather than buttons.
+func linkText(v View, runURL string) string {
+	var out []string
+	if u := v.Cluster.AppURL(v.App); u != "" {
+		out = append(out, "<"+u+"|Argo CD>")
+	}
+	for _, l := range v.Cfg.ResolvedLinks(v.Cluster, v.App, v.Namespace) {
+		out = append(out, "<"+l.URL+"|"+escape(l.Text)+">")
+	}
+	if runURL != "" {
+		out = append(out, "<"+runURL+"|CI run>")
+	}
+	return strings.Join(out, " · ")
+}
+
+// message is a plain-text notification line plus the blocks people see. A
+// mention goes in both, so it notifies and shows.
+func message(title, mention string, blocks []Block, meta *Metadata) Payload {
+	text := plainTitle(title)
+	if mention != "" {
+		text = mention + " " + text
+		if t, ok := blocks[0]["text"].(Block); ok {
+			t["text"] = mention + " " + t["text"].(string)
+		}
+	}
+	return Payload{Text: text, Blocks: compact(blocks...), Metadata: meta}
+}
+
+// RenderDeploy draws one deploy message. A healthy deploy is three short
+// lines; trouble adds what went wrong and why.
 func RenderDeploy(v View, d *Deploy) Payload {
-	cl := v.Cluster
-	color, title := colorRun, ""
+	cl, app := v.Cluster, appLink(v)
+	var title string
 	switch d.State {
 	case DeploySyncing:
-		title = fmt.Sprintf("🔄 Syncing %s to %s", appLink(v), cl.Name)
+		title = fmt.Sprintf("%s is syncing to %s", app, cl.Name)
 		if d.Attempts > 1 {
-			title += fmt.Sprintf(" · attempt %d", d.Attempts)
+			title += fmt.Sprintf(", attempt %d", d.Attempts)
 		}
 	case DeployRolling:
-		title = fmt.Sprintf("🔄 Rolling out %s to %s", appLink(v), cl.Name)
+		title = fmt.Sprintf("%s is rolling out on %s", app, cl.Name)
 	case DeployStalled:
-		color = colorWarn
-		title = fmt.Sprintf("⏳ %s still rolling out on %s · %s", appLink(v), cl.Name, short(v.Now.Sub(d.StartedAt)))
+		title = fmt.Sprintf("%s is still rolling out on %s after %s", app, cl.Name, short(v.Now.Sub(d.StartedAt)))
 	case DeployHealthy:
-		color = colorOK
-		title = fmt.Sprintf("✅ %s deployed to %s · %s", appLink(v), cl.Name, short(d.FinishedAt.Sub(d.StartedAt)))
+		title = fmt.Sprintf("%s deployed to %s in %s", app, cl.Name, short(d.FinishedAt.Sub(d.StartedAt)))
 	case DeployFailed:
-		color = colorBad
-		title = fmt.Sprintf("❌ %s deploy failed on %s", appLink(v), cl.Name)
+		title = fmt.Sprintf("%s failed to deploy to %s", app, cl.Name)
 	case DeployUnhealthy:
-		color = colorBad
-		title = fmt.Sprintf("🔴 %s is %s after deploying to %s", appLink(v), strings.ToLower(orDefault(d.Reason.healthWord(), "unhealthy")), cl.Name)
+		title = fmt.Sprintf("%s is %s after deploying to %s", app, strings.ToLower(orDefault(d.Reason.healthWord(), "unhealthy")), cl.Name)
 	case DeployRecovered:
-		color = colorOK
-		title = fmt.Sprintf("✅ %s recovered on %s · %s after the deploy", appLink(v), cl.Name, short(d.FinishedAt.Sub(d.StartedAt)))
+		title = fmt.Sprintf("%s recovered on %s, %s after the deploy", app, cl.Name, short(d.FinishedAt.Sub(d.StartedAt)))
 	case DeploySuperseded:
-		color = colorMute
-		title = fmt.Sprintf("⏭ %s deploy on %s was superseded by a newer sync", appLink(v), cl.Name)
+		title = fmt.Sprintf("%s's deploy to %s was replaced by a newer sync", app, cl.Name)
 	}
-	if d.Muted || v.Mute != nil {
-		color = colorMute
+	kind := KindDeploys
+	if d.State == DeployFailed || d.State == DeployUnhealthy {
+		kind = KindFailed
 	}
-
-	var blocks []Block
-	if line := commitLine(v.Cfg, d); line != "" {
-		blocks = append(blocks, section(line))
-	}
-	if d.State != DeployFailed && d.State != DeploySuperseded {
-		blocks = append(blocks, deploySteps(v, d)...)
-	}
+	// what went wrong reads as the headline's second line
+	lines := []string{title}
 	if d.State == DeployFailed {
-		if d.Baseline || len(d.Failures) == 0 {
-			blocks = append(blocks, section(orDefault(firstLine(d.OpMessage), "The sync failed.")))
-		} else {
-			blocks = append(blocks, section(fmt.Sprintf("The sync failed after %d attempt%s. Nothing new was rolled out.", d.Attempts, plural(d.Attempts))))
-		}
 		for i, f := range d.Failures {
-			if i == 4 {
-				blocks = append(blocks, contextBlock(fmt.Sprintf("and %d more", len(d.Failures)-4)))
+			if i == 3 {
+				lines = append(lines, fmt.Sprintf("and %d more", len(d.Failures)-3))
 				break
 			}
-			blocks = append(blocks, section("> "+f))
+			lines = append(lines, escape(stripMrkdwn(f)))
 		}
+		if len(d.Failures) == 0 || d.Baseline {
+			lines = append(lines[:1], escape(orDefault(firstLine(d.OpMessage), "The sync failed.")))
+		}
+	} else if d.State == DeployUnhealthy && d.Reason != nil && d.Reason.Summary != "" {
+		lines = append(lines, escape(d.Reason.Summary))
 	}
-	if d.Reason != nil && (d.State == DeployFailed || d.State == DeployUnhealthy) {
-		blocks = append(blocks, reasonBlocks(v, d.Reason)...)
+	blocks := []Block{headline(strings.Join(lines, "\n"), moreMenu(v, kind))}
+	switch d.State {
+	case DeploySyncing, DeployRolling, DeployStalled, DeployUnhealthy:
+		blocks = append(blocks, deploySteps(v, d)...)
+	}
+	if r := d.Reason; r != nil && (d.State == DeployFailed || d.State == DeployUnhealthy) {
+		blocks = append(blocks, reasonBlocks(v, r)...)
 	}
 
-	var fields []Block
-	if c := d.Commit; c != "" {
-		txt := "`" + shortSHA(c) + "`"
-		if u := v.Cfg.CommitURL(d.Repo, c); u != "" {
-			txt = fmt.Sprintf("<%s|`%s`>", u, shortSHA(c))
-		}
-		if d.Repo != "" {
-			txt += " · " + d.Repo
-		}
-		fields = append(fields, mrkdwn("*Commit*\n"+txt))
+	if line := commitLine(v.Cfg, d); line != "" {
+		blocks = append(blocks, contextBlock(line))
 	}
-	who := "automated"
-	switch {
-	case d.Actor != "":
-		who = d.Actor
-	case !d.Automated && d.Username != "":
-		who = d.Username + " (manual sync)"
+	meta := []string{whoText(v.Cfg, d)}
+	if d.State == DeployFailed && !d.Baseline && len(d.Failures) > 0 {
+		meta = append(meta, fmt.Sprintf("%d attempt%s, nothing new rolled out", d.Attempts, plural(d.Attempts)))
 	}
-	fields = append(fields, mrkdwn("*By*\n"+who))
-	if img := deployImage(d); img != "" {
-		fields = append(fields, mrkdwn("*Image*\n"+img))
-	}
-	if took := tookText(d, v.Now); took != "" {
-		fields = append(fields, mrkdwn("*Took*\n"+took))
-	}
-	blocks = append(blocks, Block{"type": "section", "fields": fields})
-
-	var btns []Block
-	btns = append(btns, urlButton("Argo CD", cl.AppURL(v.App), "open_argocd"))
-	btns = append(btns, linkButtons(v)...)
-	if d.PR != "" {
-		btns = append(btns, urlButton("PR #"+d.PR, v.Cfg.PRURL(d.Repo, d.PR), "open_pr"))
-	} else if d.RunURL != "" {
-		btns = append(btns, urlButton("CI run", d.RunURL, "open_run"))
-	}
-	if d.State == DeployFailed || d.State == DeployUnhealthy {
-		btns = append(btns, button("Mute…", "mute_open", value(v.Cluster.Name, v.App, KindFailed), ""))
-	} else {
-		btns = append(btns, moreMenu(v, KindDeploys))
-	}
-	blocks = append(blocks, actions(btns...))
-
-	ctx := []string{envLine(cl), "Started " + slackTime(d.StartedAt, "{date_short_pretty} {time}")}
-	switch {
-	case d.State == DeployHealthy:
-		ctx = append(ctx, "healthy "+slackTime(d.FinishedAt, "{time}"))
-	case d.State == DeployFailed && !d.FinishedAt.IsZero():
-		ctx = append(ctx, "failed "+slackTime(d.FinishedAt, "{time}"))
-		if d.Health != "" && d.Health != "Healthy" {
-			ctx = append(ctx, "app is "+strings.ToLower(d.Health))
-		}
-	}
-	if d.FixedBy != "" {
-		ctx = append(ctx, "✅ "+d.FixedBy)
-	}
+	meta = append(meta, d.FixedBy)
 	if v.Mute != nil {
-		ctx = append(ctx, v.Mute.Note())
+		meta = append(meta, v.Mute.Note())
 	}
-	blocks = append(blocks, contextBlock(strings.Join(ctx, " · ")))
-
-	text := plainTitle(title)
-	if d.Mention != "" {
-		text, title = d.Mention+" "+text, d.Mention+" "+title
-	}
-	return headlined(text, title, color, blocks,
+	meta = append(meta, linkText(v, d.RunURL))
+	blocks = append(blocks, contextBlock(dot(meta...)))
+	return message(title, d.Mention, blocks,
 		&Metadata{EventType: "argocd_deploy", EventPayload: map[string]any{"id": d.ID, "cluster": cl.Name, "app": v.App, "state": string(d.State)}})
 }
 
@@ -300,7 +257,7 @@ func commitLine(cfg Config, d *Deploy) string {
 	}
 	t := trimTo(d.Title, 200)
 	if u := cfg.PRURL(d.Repo, d.PR); u != "" {
-		return fmt.Sprintf("<%s|%s> #%s", u, escape(t), d.PR)
+		return fmt.Sprintf("<%s|%s #%s>", u, escape(t), d.PR)
 	}
 	if u := cfg.CommitURL(d.Repo, d.Commit); u != "" {
 		return fmt.Sprintf("<%s|%s>", u, escape(t))
@@ -311,27 +268,23 @@ func commitLine(cfg Config, d *Deploy) string {
 	return escape(t)
 }
 
-func tookText(d *Deploy, now time.Time) string {
-	switch d.State {
-	case DeployHealthy, DeployRecovered:
-		s := short(d.FinishedAt.Sub(d.StartedAt))
-		if !d.SyncedAt.IsZero() && d.State == DeployHealthy {
-			s += fmt.Sprintf(" · sync %s, rollout %s", short(d.SyncedAt.Sub(d.StartedAt)), short(d.FinishedAt.Sub(d.SyncedAt)))
+// whoText is the short commit and who shipped it, e.g. "4be81c0 by mara-lee".
+func whoText(cfg Config, d *Deploy) string {
+	sha := ""
+	if c := d.Commit; c != "" {
+		sha = shortSHA(c)
+		if u := cfg.CommitURL(d.Repo, c); u != "" {
+			sha = "<" + u + "|" + sha + ">"
 		}
-		return s
-	case DeployFailed:
-		if d.FinishedAt.IsZero() {
-			return ""
-		}
-		return fmt.Sprintf("%s · %d attempt%s", short(d.FinishedAt.Sub(d.StartedAt)), d.Attempts, plural(d.Attempts))
-	case DeploySuperseded:
-		return ""
-	default:
-		if now.Sub(d.StartedAt) < time.Second {
-			return ""
-		}
-		return short(now.Sub(d.StartedAt)) + " so far"
 	}
+	who := ""
+	switch {
+	case d.Actor != "":
+		who = "by " + d.Actor
+	case !d.Automated && d.Username != "":
+		who = "synced by " + d.Username
+	}
+	return strings.TrimSpace(sha + " " + who)
 }
 
 func deploySteps(v View, d *Deploy) []Block {
@@ -353,19 +306,12 @@ func deploySteps(v View, d *Deploy) []Block {
 		if d.Progress != "" {
 			roll.title = "Roll out " + d.Progress + " pods"
 		}
-		switch d.State {
-		case DeployHealthy, DeployRecovered:
-			roll.status, roll.title = "complete", "Roll out"
-			roll.detail = short(d.FinishedAt.Sub(d.SyncedAt))
-		case DeployUnhealthy:
+		if d.State == DeployUnhealthy {
 			roll.status = "error"
-		default:
+		} else {
 			roll.detail = short(v.Now.Sub(d.SyncedAt)) + " so far"
 		}
 		tasks = append(tasks, roll)
-	}
-	if d.State == DeployHealthy || d.State == DeployRecovered {
-		tasks = append(tasks, task{"healthy", "Healthy", "complete", ""})
 	}
 	if v.Rich {
 		var ts []Block
@@ -382,69 +328,68 @@ func deploySteps(v View, d *Deploy) []Block {
 	}
 	var parts []string
 	for _, t := range tasks {
-		mark := map[string]string{"complete": "✓", "in_progress": "◐", "error": "✗"}[t.status]
-		p := mark + " " + t.title
+		p := t.title
+		switch t.status {
+		case "complete":
+			p += " done"
+		case "error":
+			p += " failed"
+		}
 		if t.detail != "" {
-			p += " " + t.detail
+			p += ", " + t.detail
 		}
 		parts = append(parts, p)
 	}
-	return []Block{contextBlock(strings.Join(parts, "  ·  "))}
+	return []Block{contextBlock(dot(parts...))}
 }
 
+// reasonBlocks backs up the headline's reason with one log line and folds
+// the rest away.
 func reasonBlocks(v View, r *Reason) []Block {
-	head := []string{}
-	if r.Resource != "" {
-		kind, rest, _ := strings.Cut(r.Resource, " ")
-		head = append(head, fmt.Sprintf("*%s* `%s`", kind, rest))
-	}
-	if r.Ready != "" {
-		head = append(head, r.Ready+" ready")
-	}
-	if r.Summary != "" {
-		head = append(head, escape(r.Summary))
-	}
-	out := []Block{section(strings.Join(head, " · "))}
+	var out []Block
 	if r.Excerpt != "" {
 		out = append(out, section("```"+strings.ReplaceAll(r.Excerpt, "```", "'''")+"```"))
 	}
 	var detail []string
-	detail = append(detail, r.Details...)
-	if r.Image != "" {
-		detail = append(detail, "image `"+r.Image+"`")
+	if r.Resource != "" {
+		detail = append(detail, r.Resource)
+	}
+	if r.Ready != "" {
+		detail = append(detail, r.Ready+" ready")
 	}
 	if r.Pods > 0 {
-		detail = append([]string{fmt.Sprintf("%d pod%s", r.Pods, plural(r.Pods))}, detail...)
+		detail = append(detail, fmt.Sprintf("%d pod%s", r.Pods, plural(r.Pods)))
+	}
+	detail = append(detail, r.Details...)
+	if r.Image != "" {
+		detail = append(detail, r.Image)
 	}
 	if len(detail) == 0 {
 		return out
 	}
 	if v.Rich {
-		out = append(out, Block{
+		return append(out, Block{
 			"type":              "container",
 			"title":             plain("Details"),
-			"subtitle":          mrkdwn(trimTo(strings.Join(detail, " · "), 140)),
+			"subtitle":          mrkdwn(escape(trimTo(dot(detail...), 140))),
 			"is_collapsible":    true,
 			"default_collapsed": true,
-			"child_blocks":      []Block{contextBlock(detail...)},
+			"child_blocks":      []Block{contextBlock(escape(strings.Join(detail, "\n")))},
 		})
-		return out
 	}
-	return append(out, contextBlock(strings.Join(detail, " · ")))
+	return append(out, contextBlock(escape(dot(detail...))))
 }
 
 // RenderIncident draws one incident message.
 func RenderIncident(v View, inc *Incident) Payload {
-	cl := v.Cluster
-	color := colorBad
+	cl, app := v.Cluster, appLink(v)
+	open := inc.State == IncidentOpen
 	var title string
 	switch inc.State {
 	case IncidentResolved:
-		color = colorOK
-		title = fmt.Sprintf("✅ %s recovered on %s · down %s", appLink(v), cl.Name, short(inc.Downtime(v.Now)))
+		title = fmt.Sprintf("%s recovered on %s after %s", app, cl.Name, short(inc.Downtime(v.Now)))
 	case IncidentClosed:
-		color = colorMute
-		title = fmt.Sprintf("⚪ %s was removed from Argo CD on %s", appLink(v), cl.Name)
+		title = fmt.Sprintf("%s was removed from Argo CD on %s", app, cl.Name)
 	default:
 		word := "degraded"
 		switch inc.Health {
@@ -453,51 +398,44 @@ func RenderIncident(v View, inc *Incident) Payload {
 		case "Unknown":
 			word = "in an unknown state"
 		}
-		title = fmt.Sprintf("🔴 %s is %s on %s · %s", appLink(v), word, cl.Name, short(inc.Downtime(v.Now)))
-		if inc.Flaps > 0 {
-			title += fmt.Sprintf(" · flapped %d×", inc.Flaps)
-		}
+		title = fmt.Sprintf("%s is %s on %s", app, word, cl.Name)
 	}
-	if v.Mute != nil && inc.State == IncidentOpen {
-		color = colorMute
+	head := title
+	if r := inc.Reason; open && r != nil && r.Summary != "" {
+		head += "\n" + escape(r.Summary)
 	}
-	var blocks []Block
-	if r := inc.Reason; r != nil {
-		if inc.State == IncidentOpen {
+	blocks := []Block{section(head)}
+	var ctx []string
+	if open {
+		if r := inc.Reason; r != nil {
 			blocks = append(blocks, reasonBlocks(v, r)...)
-		} else if r.Summary != "" {
-			blocks = append(blocks, contextBlock("Was "+escape(r.Summary)))
 		}
-	}
-	btns := append([]Block{urlButton("Argo CD", cl.AppURL(v.App), "open_argocd")}, linkButtons(v)...)
-	if inc.State == IncidentOpen {
+		var btns []Block
 		if inc.AckBy == "" {
 			btns = append(btns, button("I'm on it", "ack", value(cl.Name, v.App, inc.ID), "primary"))
 		}
 		btns = append(btns, button("Mute…", "mute_open", value(cl.Name, v.App, KindIncidents), ""))
-	}
-	blocks = append(blocks, actions(btns...))
-	var ctx []string
-	ctx = append(ctx, envLine(cl))
-	switch inc.State {
-	case IncidentOpen:
+		blocks = append(blocks, actions(btns...))
 		ctx = append(ctx, "Since "+slackTime(inc.FirstUnhealthyAt, "{date_short_pretty} {time}"))
-	default:
-		ctx = append(ctx, fmt.Sprintf("Unhealthy %s → %s %s", slackTime(inc.FirstUnhealthyAt, "{date_short_pretty} {time}"),
-			map[IncidentState]string{IncidentResolved: "healthy", IncidentClosed: "removed"}[inc.State], slackTime(inc.ResolvedAt, "{time}")))
+	} else {
+		if r := inc.Reason; r != nil && r.Summary != "" {
+			was, _, _ := strings.Cut(r.Summary, " · ")
+			ctx = append(ctx, "Was "+escape(was))
+		}
+		ctx = append(ctx, slackTime(inc.FirstUnhealthyAt, "{time}")+" to "+slackTime(inc.ResolvedAt, "{time}"))
 	}
-	if inc.AckBy != "" && inc.State == IncidentOpen {
-		ctx = append(ctx, fmt.Sprintf("👀 <@%s> is on it", inc.AckBy))
+	if inc.Flaps > 0 {
+		ctx = append(ctx, fmt.Sprintf("flapped %d×", inc.Flaps))
 	}
-	if v.Mute != nil && inc.State == IncidentOpen {
+	if open && inc.AckBy != "" {
+		ctx = append(ctx, fmt.Sprintf("<@%s> is on it", inc.AckBy))
+	}
+	if open && v.Mute != nil {
 		ctx = append(ctx, v.Mute.Note())
 	}
-	blocks = append(blocks, contextBlock(strings.Join(ctx, " · ")))
-	text := plainTitle(title)
-	if inc.Mention != "" {
-		text, title = inc.Mention+" "+text, inc.Mention+" "+title
-	}
-	return headlined(text, title, color, blocks,
+	ctx = append(ctx, linkText(v, ""))
+	blocks = append(blocks, contextBlock(dot(ctx...)))
+	return message(title, inc.Mention, blocks,
 		&Metadata{EventType: "argocd_incident", EventPayload: map[string]any{"id": inc.ID, "cluster": cl.Name, "app": v.App, "state": string(inc.State)}})
 }
 
@@ -516,36 +454,31 @@ func RenderBaseline(cl Cluster, total int, rows []BaselineRow) Payload {
 	var title string
 	switch {
 	case len(rows) == 0:
-		title = fmt.Sprintf("👋 Now watching *%s* · all %s are healthy", cl.Name, apps)
+		title = fmt.Sprintf("Now watching *%s* · all %s are healthy", cl.Name, apps)
 	case len(open) == 0:
-		title = fmt.Sprintf("👋 Now watching *%s* · all %s are healthy now", cl.Name, apps)
+		title = fmt.Sprintf("Now watching *%s* · all %s are healthy now", cl.Name, apps)
 	default:
 		verb := map[bool]string{true: "is", false: "are"}[len(open) == 1]
-		still := "already"
 		if len(done) > 0 {
-			still = "still"
+			verb += " still"
 		}
-		title = fmt.Sprintf("👋 Now watching *%s* · %d of %d apps %s %s unhealthy", cl.Name, len(open), total, verb, still)
+		title = fmt.Sprintf("Now watching *%s* · %d of %s %s unhealthy", cl.Name, len(open), apps, verb)
 	}
 
-	var blocks []Block
+	blocks := []Block{section(title)}
 	for i, r := range open {
 		if i == 30 {
 			blocks = append(blocks, contextBlock(fmt.Sprintf("and %d more", len(open)-30)))
 			break
 		}
-		icon, summary := "🔴", r.Summary
-		if r.Kind == "deploy" {
-			icon = "❌"
-		}
-		line := icon + " " + linkedApp(cl, r.App) + "  " + escape(trimTo(summary, 200))
+		line := linkedApp(cl, r.App) + "  " + escape(trimTo(r.Summary, 200))
 		if !r.Since.IsZero() {
 			line += " · since " + slackTime(r.Since, "{date_short_pretty} {time}")
 		}
 		if r.Detail != "" {
 			line += "\n`" + strings.ReplaceAll(trimTo(r.Detail, 300), "`", "'") + "`"
 		}
-		b := Block{"type": "section", "text": mrkdwn(line)}
+		b := section(line)
 		opts := []Block{{"text": plain("Mute…"), "value": value("mute", cl.Name, r.App, KindIncidents)}}
 		if u := cl.AppURL(r.App); u != "" {
 			opts = append([]Block{{"text": plain("Open in Argo CD"), "value": value("open", cl.Name, r.App), "url": u}}, opts...)
@@ -555,34 +488,27 @@ func RenderBaseline(cl Cluster, total int, rows []BaselineRow) Payload {
 	}
 	var notes []string
 	for _, r := range done {
-		n := "✅ *" + r.App + "* recovered"
+		n := r.App + " recovered"
 		if r.Kind == "deploy" {
-			n = "✅ *" + r.App + "* redeployed"
+			n = r.App + " redeployed"
 		}
 		if !r.ResolvedAt.IsZero() {
-			n += " " + slackTime(r.ResolvedAt, "{time}")
+			n += " at " + slackTime(r.ResolvedAt, "{time}")
 			if !r.Since.IsZero() && r.ResolvedAt.After(r.Since) {
 				n += " after " + short(r.ResolvedAt.Sub(r.Since))
 			}
 		}
 		notes = append(notes, n)
 	}
-	for len(notes) > 0 && len(blocks) < 46 {
+	for len(notes) > 0 && len(blocks) < 47 {
 		n := min(len(notes), 10)
 		blocks = append(blocks, contextBlock(notes[:n]...))
 		notes = notes[n:]
 	}
-	ctx := envLine(cl)
 	if len(open) > 0 {
-		ctx += " · lines turn ✅ as apps recover; new problems get their own message"
+		blocks = append(blocks, contextBlock("Each line updates when its app recovers. New problems get their own message."))
 	}
-	blocks = append(blocks, contextBlock(ctx))
-	color := colorWarn
-	if len(open) == 0 {
-		color = colorOK
-	}
-	return headlined(plainTitle(title), title, color, blocks,
-		&Metadata{EventType: "argocd_baseline", EventPayload: map[string]any{"cluster": cl.Name}})
+	return message(title, "", blocks, &Metadata{EventType: "argocd_baseline", EventPayload: map[string]any{"cluster": cl.Name}})
 }
 
 // DigestRow is one long-running problem in the daily summary.
@@ -593,7 +519,7 @@ type DigestRow struct {
 
 // RenderDigest draws the weekday summary for one channel.
 func RenderDigest(title string, rows []DigestRow, stats Stats, rich bool) Payload {
-	blocks := []Block{section("*" + title + "*"), section("*Unhealthy for more than a day*")}
+	blocks := []Block{section("*" + title + "*\nUnhealthy for more than a day")}
 	if rich {
 		header := []Block{rawCell("App"), rawCell("Cluster"), rawCell("For"), rawCell("Reason"), rawCell("")}
 		table := [][]Block{header}
@@ -602,19 +528,17 @@ func RenderDigest(title string, rows []DigestRow, stats Stats, rich bool) Payloa
 		}
 		blocks = append(blocks, Block{"type": "table", "rows": table})
 	} else {
+		var lines []string
 		for _, r := range rows {
 			name := "*" + r.App + "*"
 			if r.URL != "" {
 				name = fmt.Sprintf("*<%s|%s>*", r.URL, r.App)
 			}
-			line := fmt.Sprintf("• %s · %s · %s · %s", name, r.Clusters, r.For, escape(r.Reason))
-			if r.Note != "" {
-				line += " · _" + r.Note + "_"
-			}
-			blocks = append(blocks, section(line))
+			lines = append(lines, dot(name, r.Clusters, r.For, escape(r.Reason), r.Note))
 		}
+		blocks = append(blocks, section(strings.Join(lines, "\n")))
 	}
-	blocks = append(blocks, contextBlock(fmt.Sprintf("Last 24 h: %d deploys · %d failed · %d incidents resolved · %d blips suppressed",
+	blocks = append(blocks, contextBlock(fmt.Sprintf("Last 24 hours: %d deploys, %d failed, %d incidents resolved, %d blips ignored",
 		stats.Deploys, stats.Failed, stats.Resolved, stats.Blips)))
 	return Payload{Text: title, Blocks: blocks, Metadata: &Metadata{EventType: "argocd_digest", EventPayload: map[string]any{"title": title}}}
 }
@@ -645,7 +569,7 @@ func RenderHome(clusters []HomeCluster, mutes []Mute, now time.Time) map[string]
 		if !c.Enabled {
 			status = "not watched yet"
 		} else if !c.LastPoll.IsZero() && now.Sub(c.LastPoll) > 5*time.Minute {
-			status += " · ⚠️ last read " + slackTime(c.LastPoll, "{time}")
+			status += " · not read since " + slackTime(c.LastPoll, "{time}")
 		}
 		b := section(fmt.Sprintf("*%s*\n%s", c.Name, status))
 		b["accessory"] = button("Mute…", "mute_open", value(c.Name, "", KindIncidents), "")
@@ -767,26 +691,4 @@ func plainTitle(s string) string {
 
 func escape(s string) string {
 	return strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;").Replace(s)
-}
-
-func linkButtons(v View) []Block {
-	var out []Block
-	for i, l := range v.Cfg.ResolvedLinks(v.Cluster, v.App, v.Namespace) {
-		out = append(out, urlButton(l.Text, l.URL, fmt.Sprintf("open_link_%d", i)))
-	}
-	return out
-}
-
-// deployImage is the first image Argo CD reports for the app, or the image
-// of the failing container.
-func deployImage(d *Deploy) string {
-	switch {
-	case len(d.Images) == 1:
-		return "`" + shortImage(d.Images[0]) + "`"
-	case len(d.Images) > 1:
-		return fmt.Sprintf("`%s` +%d", shortImage(d.Images[0]), len(d.Images)-1)
-	case d.Reason != nil && d.Reason.Image != "":
-		return "`" + d.Reason.Image + "`"
-	}
-	return ""
 }

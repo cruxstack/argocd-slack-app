@@ -93,12 +93,20 @@ func entry(at time.Time, format string, args ...any) Entry {
 	return Entry{At: at, Text: fmt.Sprintf(format, args...)}
 }
 
+// quietEntry is kept in the timeline but never posted to the thread, for
+// steps the message itself already shows.
+func quietEntry(at time.Time, format string, args ...any) Entry {
+	e := entry(at, format, args...)
+	e.Posted = true
+	return e
+}
+
 func startDeploy(rec *AppRecord, s Snapshot, now time.Time) {
 	if old := rec.Deploy; old != nil {
 		if !old.State.Final() {
 			old.State = DeploySuperseded
 			old.FinishedAt = now
-			old.Timeline = append(old.Timeline, entry(now, "Superseded by a newer sync."))
+			old.Timeline = append(old.Timeline, quietEntry(now, "Superseded by a newer sync."))
 			old.Dirty = true
 		}
 		if !old.Quiet || old.Msg.Posted() {
@@ -127,7 +135,7 @@ func startDeploy(rec *AppRecord, s Snapshot, now time.Time) {
 	if !op.Automated && op.Username != "" {
 		who = "by " + op.Username
 	}
-	d.Timeline = append(d.Timeline, entry(op.StartedAt, "Sync started (%s).", who))
+	d.Timeline = append(d.Timeline, quietEntry(op.StartedAt, "Sync started (%s).", who))
 	if last := rec.LastDeploy; last != nil && s.Commit != "" && last.Commit == s.Commit &&
 		(last.State == DeployHealthy || last.State == DeployRecovered) {
 		d.Quiet = true
@@ -165,14 +173,14 @@ func advanceDeploy(cfg Config, rec *AppRecord, d *Deploy, s Snapshot, now time.T
 		d.State = state
 		d.Dirty = true
 		if format != "" {
-			d.Timeline = append(d.Timeline, entry(now, format, args...))
+			d.Timeline = append(d.Timeline, quietEntry(now, format, args...))
 		}
 	}
 	switch {
 	case op.Phase == "Running" || op.Phase == "Terminating":
 		if n := op.RetryCount + 1; n != d.Attempts {
 			d.Attempts, d.Dirty = n, true
-			d.Timeline = append(d.Timeline, entry(now, "Attempt %d.", n))
+			d.Timeline = append(d.Timeline, quietEntry(now, "Attempt %d.", n))
 		}
 		set(DeploySyncing, "")
 	case failedPhase(op.Phase):
@@ -198,7 +206,7 @@ func advanceDeploy(cfg Config, rec *AppRecord, d *Deploy, s Snapshot, now time.T
 				d.SyncedAt = now
 			}
 			d.Dirty = true
-			d.Timeline = append(d.Timeline, entry(d.SyncedAt, "Synced in %s.", short(d.SyncedAt.Sub(d.StartedAt))))
+			d.Timeline = append(d.Timeline, quietEntry(d.SyncedAt, "Synced in %s.", short(d.SyncedAt.Sub(d.StartedAt))))
 		}
 		switch {
 		case healthyish(s.Health):
@@ -254,7 +262,7 @@ func advanceDeploy(cfg Config, rec *AppRecord, d *Deploy, s Snapshot, now time.T
 		}
 	}
 	if d.State == DeployHealthy && rec.LastDeploy != nil && rec.LastDeploy.State == DeployFailed && rec.LastDeploy.FixedBy == "" {
-		rec.LastDeploy.FixedBy = fmt.Sprintf("Fixed by the %s deploy%s.", slackTime(d.HealthyAt, "{time}"), commitSuffix(d.Commit))
+		rec.LastDeploy.FixedBy = fmt.Sprintf("Fixed by the %s deploy%s", slackTime(d.HealthyAt, "{time}"), commitSuffix(d.Commit))
 		rec.LastDeploy.Dirty = true
 	}
 }
@@ -263,7 +271,7 @@ func commitSuffix(commit string) string {
 	if commit == "" {
 		return ""
 	}
-	return " of `" + shortSHA(commit) + "`"
+	return " of " + shortSHA(commit)
 }
 
 func advanceIncident(cfg Config, rec *AppRecord, s Snapshot, now time.Time, baseline, allowOpen bool, st *Step) {
@@ -295,7 +303,7 @@ func advanceIncident(cfg Config, rec *AppRecord, s Snapshot, now time.Time, base
 				Health:           s.Health,
 				FirstUnhealthyAt: first,
 			}
-			inc.Timeline = append(inc.Timeline, entry(first, "%s: %s", s.Health, healthText(s)))
+			inc.Timeline = append(inc.Timeline, quietEntry(first, "%s: %s", s.Health, healthText(s)))
 			rec.Incident = inc
 		}
 		inc.Health = s.Health
@@ -309,7 +317,7 @@ func advanceIncident(cfg Config, rec *AppRecord, s Snapshot, now time.Time, base
 				inc.State, inc.OpenedAt, inc.Baseline = IncidentOpen, now, baseline
 				inc.Dirty = true
 				if !baseline {
-					inc.Timeline = append(inc.Timeline, entry(now, "Still %s after %s, so this incident is open.", strings.ToLower(s.Health), short(grace)))
+					inc.Timeline = append(inc.Timeline, quietEntry(now, "Still %s after %s, so this incident is open.", strings.ToLower(s.Health), short(grace)))
 				}
 				st.NeedIncidentReason = true
 			}
@@ -329,7 +337,9 @@ func advanceIncident(cfg Config, rec *AppRecord, s Snapshot, now time.Time, base
 		case IncidentOpen:
 			inc.State, inc.ResolvedAt = IncidentResolved, now
 			inc.Dirty = true
-			inc.Timeline = append(inc.Timeline, entry(now, "Healthy again after %s.", short(inc.Downtime(now))))
+			e := entry(now, "Healthy again after %s.", short(inc.Downtime(now)))
+			e.Posted = inc.Flaps == 0 // only a flapping incident needs the history
+			inc.Timeline = append(inc.Timeline, e)
 			rec.LastIncident, rec.Incident = inc, nil
 			st.IncidentResolved = true
 		}
@@ -342,14 +352,14 @@ func Remove(rec *AppRecord, now time.Time) {
 		if inc.State == IncidentOpen {
 			inc.State, inc.ResolvedAt, inc.CloseNote = IncidentClosed, now, "App removed from Argo CD."
 			inc.Dirty = true
-			inc.Timeline = append(inc.Timeline, entry(now, "App removed from Argo CD."))
+			inc.Timeline = append(inc.Timeline, quietEntry(now, "App removed from Argo CD."))
 			rec.LastIncident = inc
 		}
 		rec.Incident = nil
 	}
 	if d := rec.Deploy; d != nil && !d.State.Final() {
 		d.State, d.FinishedAt = DeploySuperseded, now
-		d.Timeline = append(d.Timeline, entry(now, "App removed from Argo CD."))
+		d.Timeline = append(d.Timeline, quietEntry(now, "App removed from Argo CD."))
 		d.Dirty = true
 	}
 }
