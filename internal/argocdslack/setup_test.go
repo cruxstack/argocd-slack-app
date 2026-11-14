@@ -1,9 +1,12 @@
 package argocdslack
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"image"
+	_ "image/png"
 	"net/http"
 	"net/url"
 	"strings"
@@ -11,6 +14,8 @@ import (
 	"testing"
 
 	"github.com/aws/aws-lambda-go/events"
+
+	"github.com/cruxstack/argocd-slack-app/assets"
 )
 
 type memSecrets struct {
@@ -39,6 +44,13 @@ type fakeSetupAPI struct {
 	token    string
 	team     string
 	failWith error
+	iconApp  string
+	icon     []byte
+}
+
+func (f *fakeSetupAPI) SetIcon(_ context.Context, _, appID string, png []byte) error {
+	f.iconApp, f.icon = appID, png
+	return nil
 }
 
 func (f *fakeSetupAPI) CreateApp(_ context.Context, token string, manifest any) (CreatedApp, error) {
@@ -118,6 +130,9 @@ func TestSetupWithConfigToken(t *testing.T) {
 	}
 	if api.token != "xoxe.xoxp-1" || sec.Get(ctx, SecretSigningSecret) != strings.Repeat("b", 32) || sec.Get(ctx, SecretClientID) != "111.222" {
 		t.Fatal("credentials not saved")
+	}
+	if api.iconApp != "A01" || len(api.icon) == 0 {
+		t.Fatal("the new app should get its icon")
 	}
 	m := api.manifest.(map[string]any)
 	settings := m["settings"].(map[string]any)
@@ -213,5 +228,18 @@ func TestManifestShape(t *testing.T) {
 		if !strings.Contains(string(b), want) {
 			t.Errorf("manifest missing %s", want)
 		}
+	}
+}
+
+func TestIconMeetsSlackRequirements(t *testing.T) {
+	cfg, format, err := image.DecodeConfig(bytes.NewReader(assets.Icon))
+	if err != nil || format != "png" {
+		t.Fatalf("icon must be a PNG: %v %s", err, format)
+	}
+	if cfg.Width != cfg.Height || cfg.Width < 512 || cfg.Width > 2000 {
+		t.Fatalf("slack needs a square icon between 512 and 2000 px, got %dx%d", cfg.Width, cfg.Height)
+	}
+	if len(assets.Icon) > 1<<20 {
+		t.Fatalf("keep the icon under 1 MB; it's embedded in the binary and the setup page (%d bytes)", len(assets.Icon))
 	}
 }

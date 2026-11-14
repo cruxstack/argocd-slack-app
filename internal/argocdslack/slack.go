@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -178,6 +179,7 @@ func VerifySignature(secret, timestamp, signature string, body []byte, now time.
 // install. These calls ignore DryRun: setup always talks to Slack.
 type SetupAPI interface {
 	CreateApp(ctx context.Context, configToken string, manifest any) (CreatedApp, error)
+	SetIcon(ctx context.Context, configToken, appID string, png []byte) error
 	ExchangeCode(ctx context.Context, clientID, clientSecret, code, redirectURI string) (Installation, error)
 }
 
@@ -256,6 +258,24 @@ func (c *SlackClient) CreateApp(ctx context.Context, configToken string, manifes
 		return CreatedApp{}, err
 	}
 	return CreatedApp{AppID: out.AppID, ClientID: out.Credentials.ClientID, ClientSecret: out.Credentials.ClientSecret, SigningSecret: out.Credentials.SigningSecret}, nil
+}
+
+func (c *SlackClient) SetIcon(ctx context.Context, configToken, appID string, png []byte) error {
+	var body bytes.Buffer
+	w := multipart.NewWriter(&body)
+	_ = w.WriteField("app_id", appID)
+	part, err := w.CreateFormFile("file", "icon.png")
+	if err != nil {
+		return err
+	}
+	if _, err := part.Write(png); err != nil {
+		return err
+	}
+	if err := w.Close(); err != nil {
+		return err
+	}
+	var out struct{}
+	return c.raw(ctx, "apps.icon.set", w.FormDataContentType(), configToken, body.Bytes(), &out)
 }
 
 func (c *SlackClient) ExchangeCode(ctx context.Context, clientID, clientSecret, code, redirectURI string) (Installation, error) {

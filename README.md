@@ -1,5 +1,7 @@
 # argocd-slack-app
 
+<img src="assets/icon.png" alt="argocd-slack-app icon" width="96" align="right">
+
 A Slack app for [Argo CD](https://argo-cd.readthedocs.io/) that posts **one
 message per deploy and one message per incident**, then edits that message as
 things change: syncing, rolling out, healthy or failed, degraded and
@@ -124,6 +126,14 @@ a CSRF token, and the OAuth callback checks a state cookie.
 To set the app up by hand instead, use
 [docs/slack-app-manifest.yaml](docs/slack-app-manifest.yaml) and write the SSM
 parameters yourself.
+
+### Icon
+
+[assets/icon.png](assets/icon.png) is the app's icon: a 1024×1024 PNG, inside
+Slack's 512–2000 px square range, drawn from [assets/icon.svg](assets/icon.svg).
+The installer sets it with `apps.icon.set` when you create the app with a
+configuration token. Otherwise upload it under **Basic Information → Display
+Information**; the setup page offers it as a download.
 
 ## Cluster access
 

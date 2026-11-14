@@ -19,6 +19,7 @@
     - `slack.go`, `store.go` - Slack Web API client and signature checks; DynamoDB store
     - `setup.go`, `manifest.go` - web installer (`/setup`, OAuth install and callback) and the generated app manifest
   - `internal/kube/` - minimal read-only Kubernetes client with EKS tokens
+  - `assets/` - the Slack app icon (`icon.png`, embedded; `icon.svg` is its source)
 - **Tests**: beside the code; `fakes_test.go` holds the in-memory store, Slack and cluster; `testdata/` holds synthetic fixtures
 
 ## Build & Test

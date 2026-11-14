@@ -15,6 +15,8 @@ import (
 	"strings"
 
 	"github.com/aws/aws-lambda-go/events"
+
+	"github.com/cruxstack/argocd-slack-app/assets"
 )
 
 // Secret names. Each is an environment variable holding an SSM parameter ARN.
@@ -156,6 +158,10 @@ func (a *App) setupSubmit(ctx context.Context, req events.APIGatewayV2HTTPReques
 			return a.setupPage(ctx, req, base, "", "Slack didn't create the app: "+err.Error()+". Generate a fresh token and try again, or create the app yourself below.")
 		}
 		app = created
+		// the icon is cosmetic; setup goes on without it
+		if err := a.SetupAPI.SetIcon(ctx, token, created.AppID, assets.Icon); err != nil {
+			a.Log.WarnContext(ctx, "failed to set slack app icon", "app_id", created.AppID, "error", err)
+		}
 	case "credentials":
 		app = CreatedApp{
 			ClientID:      strings.TrimSpace(form.Get("client_id")),
@@ -233,6 +239,7 @@ type setupView struct {
 	ManifestURL  string
 	ManifestJSON string
 	InstallURL   string
+	IconURL      template.URL
 	Channels     []channelLink
 	DryRun       bool
 }
@@ -259,6 +266,7 @@ func (a *App) setupPage(ctx context.Context, req events.APIGatewayV2HTTPRequest,
 		ManifestURL:  "https://api.slack.com/apps?new_app=1&manifest_json=" + url.QueryEscape(string(compact)),
 		ManifestJSON: string(manifest),
 		InstallURL:   base + "/slack/oauth/install",
+		IconURL:      template.URL("data:image/png;base64," + base64.StdEncoding.EncodeToString(assets.Icon)),
 		DryRun:       a.Cfg.DryRun,
 	}
 	seen := map[string]bool{}
@@ -290,7 +298,7 @@ func (a *App) setupPage(ctx context.Context, req events.APIGatewayV2HTTPRequest,
 			"Cache-Control":           "no-store",
 			"Referrer-Policy":         "no-referrer",
 			"X-Content-Type-Options":  "nosniff",
-			"Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+			"Content-Security-Policy": "default-src 'none'; img-src data:; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
 		},
 	}
 }
@@ -330,6 +338,7 @@ h3 { font-size:15px; margin:0; display:flex; gap:8px; align-items:center; }
 .option { display:grid; gap:12px; padding:14px; border:1px solid var(--line); border-radius:8px; }
 .tag { font-size:12px; font-weight:600; color:var(--ok); border:1px solid var(--ok); border-radius:999px; padding:0 8px; }
 .hint { font-size:13px; color:var(--muted); }
+.icon-preview { width:56px; height:56px; border-radius:12px; margin-top:6px; }
 pre { overflow-x:auto; background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:10px; font-size:12px; }
 ol { margin:0; padding-left:20px; display:grid; gap:6px; }
 code { font-size:13px; }
@@ -359,7 +368,7 @@ code { font-size:13px; }
         <li>Open <a href="https://api.slack.com/apps" target="_blank" rel="noopener">api.slack.com/apps</a> in a new tab.</li>
         <li>Below your list of apps, find <b>Your App Configuration Tokens</b> and click <b>Generate Token</b>.</li>
         <li>Choose the workspace and generate the token.</li>
-        <li>Copy the <b>access token</b> (it starts with <code>xoxe.xoxp-</code>), not the refresh token, and paste it here.</li>
+        <li>Copy the <b>access token</b> (it starts with <code>xoxe.xoxp-</code>), not the refresh token, and paste it here. The page creates the app with its icon and every URL filled in.</li>
       </ol>
       <form method="post" action="/setup">
         <input type="hidden" name="csrf" value="{{.CSRF}}">
@@ -377,6 +386,7 @@ code { font-size:13px; }
         <li><a class="button secondary" href="{{.ManifestURL}}" target="_blank" rel="noopener">Open Slack with this app's manifest</a><br><span class="hint">Slack's <b>Create an app</b> page opens in a new tab with everything filled in.</span></li>
         <li>Choose the workspace, click <b>Next</b>, check the summary, and click <b>Create</b>.</li>
         <li>On the new app's <b>Basic Information</b> page, under <b>App Credentials</b>, copy the <b>Client ID</b>. Click <b>Show</b> next to <b>Client Secret</b> and <b>Signing Secret</b> and copy those too.</li>
+        <li>On the same page, under <b>Display Information</b>, add the app icon. <a href="{{.IconURL}}" download="argocd-slack-app-icon.png">Download the icon</a> (1024×1024 PNG).<br><img class="icon-preview" src="{{.IconURL}}" alt="The app icon: a sailboat with a green check" width="56" height="56"></li>
         <li>Paste all three here and click <b>Save credentials</b>.</li>
       </ol>
       <form method="post" action="/setup">

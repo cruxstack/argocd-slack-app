@@ -53,6 +53,8 @@ func (slack) CreateApp(context.Context, string, any) (argocdslack.CreatedApp, er
 	return argocdslack.CreatedApp{AppID: "A0123456789", ClientID: "1234567890.1234567890", ClientSecret: strings.Repeat("0", 32), SigningSecret: strings.Repeat("1", 32)}, nil
 }
 
+func (slack) SetIcon(context.Context, string, string, []byte) error { return nil }
+
 func (slack) ExchangeCode(context.Context, string, string, string, string) (argocdslack.Installation, error) {
 	return argocdslack.Installation{BotToken: "xoxb-preview", TeamID: "T0123456789", TeamName: "Acme", AppID: "A0123456789"}, nil
 }
