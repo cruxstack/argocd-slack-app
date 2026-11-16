@@ -84,6 +84,7 @@ func TestDemoPlaysEveryStory(t *testing.T) {
 		"search-indexer recovered on demo",
 		"web-frontend recovered on demo",
 		"payments-worker deployed to demo",
+		"Reading Argo CD on demo again",
 		"Daily summary · dev",
 	}
 	if len(titles) != len(want) {
@@ -101,6 +102,17 @@ func TestDemoPlaysEveryStory(t *testing.T) {
 			t.Errorf("no update shows %q", w)
 		}
 	}
+	var notice string
+	for _, p := range slack.posts {
+		if strings.HasPrefix(p.Text, "Can't read Argo CD on demo") {
+			notice = mustJSON(p)
+		}
+	}
+	for _, w := range []string{"```describe cluster demo:", "AccessDenied", "role/demo-eks-cluster-argocd-slack"} {
+		if !strings.Contains(notice, w) {
+			t.Errorf("unreachable notice should show %q: %s", w, notice)
+		}
+	}
 	// Only the flapping incident has history worth a thread.
 	if threads := len(slack.posts) - len(order); threads != 2 {
 		t.Errorf("want 2 thread replies (flap and recovery), got %d", threads)
@@ -116,6 +128,13 @@ func TestDemoPlaysOneStory(t *testing.T) {
 	}
 	if !strings.Contains(last[order[0]].Text, "is done") {
 		t.Fatal("intro should say the demo is done")
+	}
+
+	app, slack, jobs = demoApp(t)
+	runDemo(t, app, jobs, "demo unreachable")
+	last, order = finalMessages(slack)
+	if len(order) != 2 || last[order[1]].Text != "Reading Argo CD on demo again" {
+		t.Fatalf("want the intro and the cluster notice, got %v", order)
 	}
 }
 
@@ -137,7 +156,7 @@ func TestDemoHandsOffBeforeTheLambdaTimesOut(t *testing.T) {
 		t.Fatal(err)
 	}
 	last, order := finalMessages(slack)
-	if len(order) != 8 || !strings.Contains(last[order[0]].Text, "is done") {
+	if len(order) != 9 || !strings.Contains(last[order[0]].Text, "is done") {
 		t.Fatalf("hand-off lost track: %d messages", len(order))
 	}
 }

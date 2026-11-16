@@ -19,22 +19,29 @@ const DemoCluster = "demo"
 // The demo runs on a virtual clock that starts demoSpan before it begins, so
 // every time it shows is in the past and the durations look real.
 const (
-	demoSpan  = 18 * time.Minute
+	demoSpan  = 25 * time.Minute
 	demoPause = 4 * time.Second
 )
 
 // demoStories maps each story to the apps that play it. Fillers only count
 // toward the baseline's total.
 var demoStories = map[string][]string{
-	"baseline":  {"legacy-reports", "nightly-export"},
-	"deploy":    {"checkout-api"},
-	"failed":    {"payments-worker"},
-	"unhealthy": {"search-indexer"},
-	"incident":  {"web-frontend"},
-	"digest":    nil,
+	"baseline":    {"legacy-reports", "nightly-export"},
+	"deploy":      {"checkout-api"},
+	"failed":      {"payments-worker"},
+	"unhealthy":   {"search-indexer"},
+	"incident":    {"web-frontend"},
+	"unreachable": nil,
+	"digest":      nil,
 }
 
-var demoOrder = []string{"deploy", "failed", "unhealthy", "incident", "baseline", "digest"}
+var demoOrder = []string{"deploy", "failed", "unhealthy", "incident", "baseline", "unreachable", "digest"}
+
+// demoUnreachable is a made-up error for the unreachable story.
+const demoUnreachable = "describe cluster demo: operation error EKS: DescribeCluster, get identity: get credentials: failed to refresh cached credentials, " +
+	"operation error STS: AssumeRole, https response error StatusCode: 403, RequestID: 5f1c2e9a-3b7d-4c11-9a0e-8d2f6b4e7c13, " +
+	"api error AccessDenied: User: arn:aws:sts::111122223333:assumed-role/argocd-slack/argocd-slack is not authorized to perform: " +
+	"sts:AssumeRole on resource: arn:aws:iam::444455556666:role/demo-eks-cluster-argocd-slack"
 
 var demoFillers = []string{"admin-portal", "image-resizer", "ledger-sync", "notifications"}
 
@@ -147,6 +154,8 @@ type demoFrame struct {
 	Acks     []string
 	Baseline bool
 	Digest   bool
+	Down     string // the cluster can't be read, with this error
+	Up       bool   // the cluster can be read again
 }
 
 type demoBuilder struct {
@@ -314,7 +323,13 @@ func demoFrames(start time.Time, user string) []demoFrame {
 	b.mutes = nil
 	b.emit(17*m, nil)
 
-	b.emit(17*m+30*time.Second, func(f *demoFrame) { f.Digest = true })
+	// The app loses access to the cluster for a few minutes. The notice posts
+	// once reads have failed for five.
+	b.emit(17*m+10*time.Second, func(f *demoFrame) { f.Down = demoUnreachable })
+	b.emit(22*m+10*time.Second, func(f *demoFrame) { f.Down = demoUnreachable })
+	b.emit(23*m+40*time.Second, func(f *demoFrame) { f.Up = true })
+
+	b.emit(24*m, func(f *demoFrame) { f.Digest = true })
 	return b.frames
 }
 
@@ -424,6 +439,16 @@ func (w *worker) demoFrame(ctx context.Context, st *DemoState, f demoFrame) {
 	if f.Digest {
 		if st.plays("digest") {
 			w.demoDigest(ctx)
+		}
+		return
+	}
+	if f.Down != "" || f.Up {
+		switch {
+		case !st.plays("unreachable"):
+		case f.Up:
+			w.reachable(ctx)
+		default:
+			w.unreachable(ctx, errors.New(f.Down))
 		}
 		return
 	}

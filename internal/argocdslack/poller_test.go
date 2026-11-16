@@ -3,6 +3,8 @@ package argocdslack
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -126,6 +128,41 @@ func TestPollEndToEnd(t *testing.T) {
 	}
 	if !rowDone {
 		t.Fatal("baseline row should turn healthy")
+	}
+}
+
+func TestPollUnreachableNotice(t *testing.T) {
+	h := newHarness(t)
+	h.cl.set(t, fixture(t, "app-web-healthy.json"), setHealth("Healthy", h.clock.Add(-time.Hour)))
+	h.poll(0) // baseline
+	posts := len(h.slack.posts)
+	h.app.Connect = func(context.Context, Cluster) (ClusterAPI, error) {
+		return nil, errors.New("describe cluster acme-plat-use1-dev-common-shop-eks-cluster: api error AccessDenied\nsecond line token=hunter2")
+	}
+	h.poll(time.Minute)
+	h.poll(3 * time.Minute)
+	if len(h.slack.posts) != posts {
+		t.Fatal("posted before reads failed for five minutes")
+	}
+	h.poll(3 * time.Minute)
+	h.poll(time.Minute)
+	if len(h.slack.posts) != posts+1 {
+		t.Fatalf("want one notice, got %d posts", len(h.slack.posts)-posts)
+	}
+	notice := h.slack.posts[posts]
+	body := mustJSON(notice)
+	if notice.Text != "Can't read Argo CD on dev-use1" || !strings.Contains(body, "```describe cluster acme-plat-use1-dev-common-shop-eks-cluster: api error AccessDenied\\nsecond line") || strings.Contains(body, "hunter2") {
+		t.Errorf("notice: %s", body)
+	}
+
+	h.app.Connect = func(context.Context, Cluster) (ClusterAPI, error) { return h.cl, nil }
+	h.poll(time.Minute)
+	n := len(h.slack.updates)
+	if n == 0 || h.slack.updates[n-1].TS != fmt.Sprintf("100.%d", posts+1) || h.slack.updates[n-1].Text != "Reading Argo CD on dev-use1 again" {
+		t.Fatalf("notice should flip to recovered: %s", mustJSON(h.slack.updates))
+	}
+	if !strings.Contains(mustJSON(h.slack.updates[n-1]), "paused for 8m") {
+		t.Error("recovered notice should say how long notifications were paused")
 	}
 }
 

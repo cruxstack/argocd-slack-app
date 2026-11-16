@@ -108,14 +108,23 @@ var redactions = []struct {
 	{regexp.MustCompile(`\b(AKIA|ASIA)[0-9A-Z]{16}\b`), "[aws-key]"},
 	{regexp.MustCompile(`\bxox[abprs]-[A-Za-z0-9-]{10,}`), "[slack-token]"},
 	{regexp.MustCompile(`\bgh[pousr]_[A-Za-z0-9]{20,}`), "[github-token]"},
-	{regexp.MustCompile(`\b[A-Za-z0-9+/_-]{40,}={0,2}`), "[redacted]"},
 	{regexp.MustCompile(`[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}`), "[email]"},
 }
 
+// longToken catches keys without a known prefix.
+var longToken = regexp.MustCompile(`\b[A-Za-z0-9+/_-]{40,}={0,2}`)
+
 // Redact strips likely secrets and personal data before text reaches Slack.
+// Long lowercase names and paths, such as EKS cluster names and IAM role
+// paths, stay readable.
 func Redact(s string) string {
 	for _, r := range redactions {
 		s = r.re.ReplaceAllString(s, r.repl)
 	}
-	return s
+	return longToken.ReplaceAllStringFunc(s, func(m string) string {
+		if strings.ContainsAny(m, "-/_") && strings.ToLower(m) == m {
+			return m
+		}
+		return "[redacted]"
+	})
 }

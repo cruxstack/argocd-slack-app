@@ -132,6 +132,14 @@ func TestExtractAndRedact(t *testing.T) {
 			t.Errorf("redaction leaked %q: %s", leak, got)
 		}
 	}
+	keys := Redact("aws_secret wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY hex 0123456789abcdef0123456789abcdef01234567")
+	if strings.Contains(keys, "EXAMPLEKEY") || strings.Contains(keys, "0123456789abcdef") {
+		t.Errorf("long keys should be redacted: %s", keys)
+	}
+	names := "describe cluster acme-plat-use1-dev-common-shop-eks-cluster: assumed-role/acme-core-use2-tools-argocd-slack/acme-core-use2-tools-argocd-slack"
+	if got := Redact(names); got != names {
+		t.Errorf("lowercase names and paths should stay readable: %s", got)
+	}
 }
 
 func TestMuteParsingAndMatching(t *testing.T) {
@@ -227,6 +235,18 @@ func TestRenderEveryState(t *testing.T) {
 		checkPayload(t, "digest", RenderDigest("Daily summary · dev", []DigestRow{{App: "preview-06", Clusters: "dev-use1", For: "3d", Reason: "image not found", Note: "cleanup?"}}, Stats{Deploys: 31}, rich))
 	}
 	for _, rich := range []bool{true, false} {
+		v := View{Cfg: cfg, Cluster: cl, Rich: rich, Now: at(90)}
+		down := RenderUnreachable(v, at(0), "list applications: dial tcp 10.0.0.1:443: i/o timeout <``` & > token=hunter2")
+		checkPayload(t, "unreachable", down)
+		body := strings.NewReplacer(`\u003c`, "<", `\u003e`, ">", `\u0026`, "&").Replace(mustJSON(down))
+		if !strings.Contains(body, "```list applications: dial tcp 10.0.0.1:443: i/o timeout &lt;''' &amp; &gt; token=[redacted]```") {
+			t.Errorf("unreachable notice should show the escaped, redacted error in a code block: %s", body)
+		}
+		up := RenderReachable(v, at(0))
+		checkPayload(t, "reachable", up)
+		if !strings.Contains(mustJSON(up), "paused for 1h 30m") {
+			t.Error("reachable notice should say how long notifications were paused")
+		}
 		checkPayload(t, "baseline", RenderBaseline(cfg, cl, 18, []BaselineRow{{App: "api", Kind: "incident", Summary: "CrashLoopBackOff · database timeout", Since: at(-1300)}, {App: "worker", Kind: "deploy", Summary: "sync failed", Resolved: true}}, rich))
 	}
 	digest := mustJSON(RenderDigest("Daily summary · dev", []DigestRow{{App: "preview-06", Clusters: "dev-use1", For: "3d", Age: 72 * time.Hour, Reason: "image not found", URL: "https://argo/x"}}, Stats{}, true))
