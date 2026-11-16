@@ -147,6 +147,7 @@ func (a *App) pollCluster(ctx context.Context, cl Cluster, mutes []Mute, deadlin
 	}
 	if err != nil {
 		w.unreachable(cctx, err)
+		w.saveMeta(context.WithoutCancel(ctx))
 		return err
 	}
 	w.reachable(cctx)
@@ -400,25 +401,36 @@ func (w *worker) remove(ctx context.Context, rec *AppRecord) {
 	delete(w.saved, rec.App)
 }
 
+func (w *worker) clusterView(rich bool) View {
+	return View{Cfg: w.a.Cfg, Cluster: w.cl, Rich: rich, Now: w.a.now()}
+}
+
+// unreachable posts once the cluster has failed for five minutes.
 func (w *worker) unreachable(ctx context.Context, cause error) {
 	now := w.a.now()
 	if w.meta.FailingSince.IsZero() {
 		w.meta.FailingSince = now
 	}
-	if now.Sub(w.meta.FailingSince) >= 5*time.Minute && !w.meta.Unreachable.Posted() {
-		text := fmt.Sprintf("Can't read Argo CD on *%s* since %s, so its notifications are paused. `%s`",
-			w.cl.Name, slackTime(w.meta.FailingSince, "{time}"), trimTo(Redact(cause.Error()), 200))
-		if msg, err := w.a.Slack.Post(ctx, Payload{Channel: w.a.Cfg.ChannelFor(w.cl), Text: text}); err == nil {
-			w.meta.Unreachable = msg
-		}
+	if now.Sub(w.meta.FailingSince) < 5*time.Minute || w.meta.Unreachable.Posted() {
+		return
 	}
-	w.saveMeta(context.WithoutCancel(ctx))
+	msg, err := w.post(ctx, w.a.Cfg.ChannelFor(w.cl), func(rich bool) Payload {
+		return RenderUnreachable(w.clusterView(rich), w.meta.FailingSince, cause.Error())
+	})
+	if err != nil {
+		w.a.Log.Error("post unreachable notice", "cluster", w.cl.Name, "error", err)
+		return
+	}
+	w.meta.Unreachable = msg
 }
 
 func (w *worker) reachable(ctx context.Context) {
 	if w.meta.Unreachable.Posted() {
-		text := fmt.Sprintf("Reading Argo CD on *%s* again after %s.", w.cl.Name, short(w.a.now().Sub(w.meta.FailingSince)))
-		_ = w.a.Slack.Update(ctx, Payload{Channel: w.meta.Unreachable.Channel, TS: w.meta.Unreachable.TS, Text: text})
+		if err := w.update(ctx, w.meta.Unreachable, func(rich bool) Payload {
+			return RenderReachable(w.clusterView(rich), w.meta.FailingSince)
+		}); err != nil {
+			w.a.Log.Warn("update unreachable notice", "cluster", w.cl.Name, "error", err)
+		}
 		w.meta.Unreachable = Message{}
 	}
 	w.meta.FailingSince = time.Time{}

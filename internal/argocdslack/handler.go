@@ -190,7 +190,7 @@ const helpText = "*/argocd* commands:\n" +
 	"• `/argocd mutes` lists active mutes\n" +
 	"• `/argocd unmute <id or scope>` ends a mute\n" +
 	"• `/argocd status [app]` shows what's unhealthy\n" +
-	"• `/argocd demo` plays every message type in this channel with made-up apps; `/argocd demo incident` plays one story (deploy, failed, unhealthy, incident, baseline, digest)"
+	"• `/argocd demo` plays every message type in this channel with made-up apps; `/argocd demo incident` plays one story (deploy, failed, unhealthy, incident, baseline, unreachable, digest)"
 
 func (a *App) command(ctx context.Context, form url.Values, now time.Time) events.APIGatewayV2HTTPResponse {
 	user, channel := form.Get("user_id"), form.Get("channel_id")

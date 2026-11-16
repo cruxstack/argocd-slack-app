@@ -35,9 +35,9 @@ to Argo CD and no Argo CD notification triggers. Deploy it with
   more than a day.
 - **Demo** - `/argocd demo` plays every message type in the current channel
   with made-up apps on a `demo` cluster: deploys that roll out, fail and get
-  fixed, an incident that flaps and is muted, a baseline and a digest. Each
-  message updates in place over about two minutes. `/argocd demo incident`
-  plays one story.
+  fixed, an incident that flaps and is muted, a baseline, a cluster that
+  can't be read for a while, and a digest. Each message updates in place over
+  about two minutes. `/argocd demo incident` plays one story.
 - **Owner mentions** - optional, for incidents and failed deploys in
   environments named `prod`.
 - **Durable** - state lives in DynamoDB, so restarts never repost or lose a

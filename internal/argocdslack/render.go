@@ -58,6 +58,14 @@ func section(t string) Block {
 	return Block{"type": "section", "text": mrkdwn(t)}
 }
 
+// codeBlock shows text as a preformatted block, line breaks and all.
+func codeBlock(t string) Block {
+	if r := []rune(t); len(r) > 2400 {
+		t = string(r[:2399]) + "…"
+	}
+	return section("```" + strings.ReplaceAll(escape(t), "```", "'''") + "```")
+}
+
 func contextBlock(parts ...string) Block {
 	var els []Block
 	for _, p := range parts {
@@ -557,6 +565,27 @@ func RenderBaseline(cfg Config, cl Cluster, total int, rows []BaselineRow, rich 
 	}
 	v := View{Cfg: cfg, Cluster: cl, Rich: rich}
 	return statusMessage(v, h, icon, "", children, nil, &Metadata{EventType: "argocd_baseline", EventPayload: map[string]any{"cluster": cl.Name}})
+}
+
+// RenderUnreachable says a cluster's notifications are paused, with the
+// redacted error in full.
+func RenderUnreachable(v View, since time.Time, cause string) Payload {
+	cl := v.Cluster
+	children := []Block{
+		section(fmt.Sprintf("Notifications for %s have been paused since %s. They resume on their own once the cluster can be read again.",
+			escape(cl.Name), slackTime(since, "{date_short_pretty} {time}"))),
+		codeBlock(Redact(cause)),
+	}
+	return statusMessage(v, heading{Rest: "Can't read Argo CD on " + cl.Name}, iconWarn, "", children, nil,
+		&Metadata{EventType: "argocd_cluster", EventPayload: map[string]any{"cluster": cl.Name, "state": "unreachable"}})
+}
+
+// RenderReachable replaces the unreachable notice once the cluster is back.
+func RenderReachable(v View, since time.Time) Payload {
+	cl := v.Cluster
+	children := []Block{contextBlock(fmt.Sprintf("Notifications were paused for %s, from %s.", short(v.Now.Sub(since)), slackTime(since, "{date_short_pretty} {time}")))}
+	return statusMessage(v, heading{Rest: "Reading Argo CD on " + cl.Name + " again"}, iconOK, "", children, nil,
+		&Metadata{EventType: "argocd_cluster", EventPayload: map[string]any{"cluster": cl.Name, "state": "reachable"}})
 }
 
 // DigestRow is one long-running problem in the daily summary.
