@@ -232,7 +232,19 @@ func TestRichBlocksFallBack(t *testing.T) {
 		delete(op, "finishedAt")
 	})
 	h.poll(time.Minute)
-	if len(h.slack.topLevel()) != 2 || !h.app.richOff.Load() {
+	top := h.slack.topLevel()
+	if len(top) != 2 || strings.Contains(mustJSON(top[1]), `"container"`) {
 		t.Fatal("deploy should post with basic blocks after Slack refuses rich ones")
+	}
+	if h.app.richOff.Load() {
+		t.Fatal("one refused message must not switch every later message to basic blocks")
+	}
+
+	h.slack.rejectRich = false
+	h.cl.set(t, fixture(t, "app-api-degraded.json"), setHealth("Degraded", h.clock))
+	h.poll(10 * time.Minute)
+	top = h.slack.topLevel()
+	if len(top) != 3 || !strings.Contains(mustJSON(top[2]), `"container"`) {
+		t.Fatalf("the next message should use rich blocks again: %d messages", len(top))
 	}
 }

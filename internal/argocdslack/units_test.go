@@ -194,6 +194,9 @@ func checkPayload(t *testing.T, name string, p Payload) {
 		if b == nil {
 			t.Errorf("%s: nil block", name)
 		}
+		if kids, _ := b["child_blocks"].([]Block); b["type"] == "container" && len(kids) == 0 {
+			t.Errorf("%s: Slack refuses a container without child blocks", name)
+		}
 		if b["type"] == "section" {
 			if txt, ok := b["text"].(Block); ok && len(txt["text"].(string)) > 3000 {
 				t.Errorf("%s: section over 3000 chars", name)
@@ -246,6 +249,11 @@ func TestRenderEveryState(t *testing.T) {
 		checkPayload(t, "reachable", up)
 		if !strings.Contains(mustJSON(up), "paused for 1h 30m") {
 			t.Error("reachable notice should say how long notifications were paused")
+		}
+		healthy := RenderBaseline(cfg, cl, 42, nil, rich)
+		checkPayload(t, "all-healthy baseline", healthy)
+		if rich && (len(healthy.Blocks) != 1 || healthy.Blocks[0]["type"] != "container") {
+			t.Errorf("all-healthy baseline should keep the status frame: %s", mustJSON(healthy))
 		}
 		checkPayload(t, "baseline", RenderBaseline(cfg, cl, 18, []BaselineRow{{App: "api", Kind: "incident", Summary: "CrashLoopBackOff · database timeout", Since: at(-1300)}, {App: "worker", Kind: "deploy", Summary: "sync failed", Resolved: true}}, rich))
 	}

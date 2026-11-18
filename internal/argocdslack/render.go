@@ -213,14 +213,15 @@ func (h heading) richText(mention string) Block {
 
 // statusMessage frames a status in a container whose icon carries the color.
 // Basic layouts, for clients or workspaces that refuse containers, put the
-// heading in a section and the children below it.
+// heading in a section and the children below it. Slack refuses a container
+// without children, so a bare heading uses the basic layout too.
 func statusMessage(v View, h heading, icon, mention string, children []Block, accessory Block, meta *Metadata) Payload {
 	text := h.plain()
 	if mention != "" {
 		text = mention + " " + text
 	}
 	children = compact(children...)
-	if v.Rich {
+	if v.Rich && len(children) > 0 {
 		if len(children) > 10 {
 			children = children[:10]
 		}
@@ -560,8 +561,11 @@ func RenderBaseline(cfg Config, cl Cluster, total int, rows []BaselineRow, rich 
 	if len(notes) > 0 {
 		children = append(children, contextBlock(notes...))
 	}
-	if len(open) > 0 {
+	switch {
+	case len(open) > 0:
 		children = append(children, contextBlock("Each line updates when its app recovers. New problems get their own message."))
+	case len(rows) == 0:
+		children = append(children, contextBlock("Deploys and new problems get their own messages."))
 	}
 	v := View{Cfg: cfg, Cluster: cl, Rich: rich}
 	return statusMessage(v, h, icon, "", children, nil, &Metadata{EventType: "argocd_baseline", EventPayload: map[string]any{"cluster": cl.Name}})
