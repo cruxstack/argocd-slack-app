@@ -38,16 +38,15 @@ func (w *worker) mention(app string) string {
 	return ""
 }
 
-// post sends a new message, retrying once without the newer blocks if Slack
-// refuses them.
+// post sends a new message, retrying it without the newer blocks if Slack
+// refuses them. The next message tries the newer blocks again.
 func (w *worker) post(ctx context.Context, channel string, render func(rich bool) Payload) (Message, error) {
 	rich := !w.a.richOff.Load()
 	p := render(rich)
 	p.Channel = channel
 	msg, err := w.a.Slack.Post(ctx, p)
 	if err != nil && rich && IsInvalidBlocks(err) {
-		w.a.richOff.Store(true)
-		w.a.Log.Warn("slack refused rich blocks; using basic blocks", "error", err)
+		w.a.Log.Warn("slack refused rich blocks; posting this message with basic blocks", "error", err)
 		p = render(false)
 		p.Channel = channel
 		msg, err = w.a.Slack.Post(ctx, p)
@@ -61,7 +60,7 @@ func (w *worker) update(ctx context.Context, m Message, render func(rich bool) P
 	p.Channel, p.TS = m.Channel, m.TS
 	err := w.a.Slack.Update(ctx, p)
 	if err != nil && rich && IsInvalidBlocks(err) {
-		w.a.richOff.Store(true)
+		w.a.Log.Warn("slack refused rich blocks; updating this message with basic blocks", "error", err)
 		p = render(false)
 		p.Channel, p.TS = m.Channel, m.TS
 		err = w.a.Slack.Update(ctx, p)
