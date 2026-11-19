@@ -79,11 +79,11 @@ func TestDemoPlaysEveryStory(t *testing.T) {
 	want := []string{
 		"Argo CD demo* by <@U9> is done",
 		"Now watching demo · 1 of 10 apps is still unhealthy",
-		"checkout-api deployed to demo in 2m 20s",
-		"payments-worker failed to deploy to demo",
-		"search-indexer recovered on demo",
+		"checkout-api v2.14.0 deployed to demo",
+		"payments-worker v5.3.0 failed to deploy to demo",
+		"search-indexer v1.9.0 recovered on demo",
 		"web-frontend recovered on demo",
-		"payments-worker deployed to demo",
+		"payments-worker v5.3.1 deployed to demo",
 		"Reading Argo CD on demo again",
 		"Daily summary · dev",
 	}
@@ -97,7 +97,8 @@ func TestDemoPlaysEveryStory(t *testing.T) {
 	}
 
 	all := strings.NewReplacer(`\u003c`, "<", `\u003e`, ">").Replace(mustJSON(slack.updates))
-	for _, w := range []string{"flapped 1×", "Muted until healthy by <@U9>", "<@U9> is on it", "rolling out 2/3 pods", "Fixed by the", "legacy-reports recovered at", "OOMKilled"} {
+	for _, w := range []string{"flapped 1×", "Muted until healthy by <@U9>", "<@U9> is on it", "rolling out 2/3 pods", "deploy of v5.3.1", "legacy-reports recovered at", "OOMKilled",
+		"v2.13.2 → v2.14.0 · started and approved by mara-lee · 2m 20s", "*OOMKilled*, 0 of 2 pods ready"} {
 		if !strings.Contains(all, w) {
 			t.Errorf("no update shows %q", w)
 		}
@@ -113,9 +114,13 @@ func TestDemoPlaysEveryStory(t *testing.T) {
 			t.Errorf("unreachable notice should show %q: %s", w, notice)
 		}
 	}
-	// Only the flapping incident has history worth a thread.
-	if threads := len(slack.posts) - len(order); threads != 2 {
-		t.Errorf("want 2 thread replies (flap and recovery), got %d", threads)
+	// The flapping incident has history worth a thread, and checkout-api's
+	// deploy lists its PRs.
+	if threads := len(slack.posts) - len(order); threads != 3 {
+		t.Errorf("want 3 thread replies (flap, recovery and PRs), got %d", threads)
+	}
+	if !strings.Contains(mustJSON(slack.posts), "3 PRs in this deploy") {
+		t.Error("checkout-api's thread should list its PRs")
 	}
 }
 

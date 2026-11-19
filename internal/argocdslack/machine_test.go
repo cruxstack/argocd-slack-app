@@ -229,8 +229,8 @@ func TestQuietResyncAtSameCommit(t *testing.T) {
 	}
 	Advance(cfg, rec, snap("Healthy", op("Succeeded", at(0), at(0).Add(time.Second))), at(1), false)
 	last := rec.LastDeploy
-	if !last.Dirty || !strings.Contains(last.Timeline[len(last.Timeline)-1].Text, "Resynced") {
-		t.Fatalf("resync should note the previous deploy's thread, got %+v", last.Timeline)
+	if !last.Dirty || last.Resyncs != 1 || !last.ResyncAt.Equal(at(0)) {
+		t.Fatalf("resync should count on the previous deploy, got %+v", last)
 	}
 }
 

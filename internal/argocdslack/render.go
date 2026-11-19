@@ -140,17 +140,18 @@ func dot(parts ...string) string {
 	return strings.Join(keep, " · ")
 }
 
-// linkText is the app's links as quiet text rather than buttons.
+// linkText is the app's links as quiet text rather than buttons, starting
+// with the deploy's own run when there is one.
 func linkText(v View, runURL string) string {
 	var out []string
+	if runURL != "" {
+		out = append(out, "<"+runURL+"|Deployment>")
+	}
 	if u := v.Cluster.AppURL(v.App); u != "" {
 		out = append(out, "<"+u+"|Argo CD>")
 	}
 	for _, l := range v.Cfg.ResolvedLinks(v.Cluster, v.App, v.Namespace) {
 		out = append(out, "<"+l.URL+"|"+escape(l.Text)+">")
-	}
-	if runURL != "" {
-		out = append(out, "<"+runURL+"|CI run>")
 	}
 	return strings.Join(out, " · ")
 }
@@ -164,24 +165,32 @@ const (
 	iconMuted = "muted"
 )
 
-// heading is a status line: a bold lead (the app, linked when it can be)
-// and the rest in plain words.
+// heading is a status line: a bold lead (the app, linked when it can be),
+// the version it deploys if known, and the rest in plain words.
 type heading struct {
-	Lead, LeadURL, Rest string
+	Lead, LeadURL, Version, VersionURL, Rest string
 }
 
 func (h heading) mrkdwn() string {
-	lead := ""
+	var parts []string
 	switch {
 	case h.Lead != "" && h.LeadURL != "":
-		lead = fmt.Sprintf("*<%s|%s>*", h.LeadURL, h.Lead)
+		parts = append(parts, fmt.Sprintf("*<%s|%s>*", h.LeadURL, h.Lead))
 	case h.Lead != "":
-		lead = "*" + h.Lead + "*"
+		parts = append(parts, "*"+h.Lead+"*")
 	}
-	return strings.TrimSpace(lead + " " + escape(h.Rest))
+	switch {
+	case h.Version != "" && h.VersionURL != "":
+		parts = append(parts, fmt.Sprintf("<%s|%s>", h.VersionURL, escape(h.Version)))
+	case h.Version != "":
+		parts = append(parts, escape(h.Version))
+	}
+	return strings.TrimSpace(strings.Join(append(parts, escape(h.Rest)), " "))
 }
 
-func (h heading) plain() string { return strings.TrimSpace(h.Lead + " " + h.Rest) }
+func (h heading) plain() string {
+	return strings.Join(strings.Fields(h.Lead+" "+h.Version+" "+h.Rest), " ")
+}
 
 // mentionElement turns <@U1> or <!subteam^S1> into a rich text element.
 func mentionElement(m string) Block {
@@ -204,7 +213,15 @@ func (h heading) richText(mention string) Block {
 		if h.LeadURL != "" {
 			lead = Block{"type": "link", "url": h.LeadURL, "text": h.Lead, "style": Block{"bold": true}}
 		}
-		els = append(els, lead, Block{"type": "text", "text": " " + h.Rest})
+		els = append(els, lead)
+		if h.Version != "" {
+			ver := Block{"type": "text", "text": h.Version}
+			if h.VersionURL != "" {
+				ver = Block{"type": "link", "url": h.VersionURL, "text": h.Version}
+			}
+			els = append(els, Block{"type": "text", "text": " "}, ver)
+		}
+		els = append(els, Block{"type": "text", "text": " " + h.Rest})
 	} else {
 		els = append(els, Block{"type": "text", "text": h.Rest})
 	}
@@ -246,11 +263,12 @@ func statusMessage(v View, h heading, icon, mention string, children []Block, ac
 
 var iconAlt = map[string]string{iconOK: "healthy", iconFail: "failing", iconWarn: "needs attention", iconRun: "in progress", iconMuted: "muted"}
 
-// RenderDeploy draws one deploy message. A healthy deploy is its heading and
-// two grey lines; trouble adds what went wrong and why.
+// RenderDeploy draws one deploy message: a heading with the version, a line
+// of what changed, who shipped it and how it went, and a grey line of links.
+// Trouble adds what went wrong and why above that line.
 func RenderDeploy(v View, d *Deploy) Payload {
 	cl := v.Cluster
-	h := heading{Lead: v.App, LeadURL: cl.AppURL(v.App)}
+	h := heading{Lead: v.App, LeadURL: cl.AppURL(v.App), Version: d.Version, VersionURL: v.Cfg.VersionURL(d.Repo, d.Version)}
 	icon := iconRun
 	switch d.State {
 	case DeploySyncing:
@@ -263,7 +281,7 @@ func RenderDeploy(v View, d *Deploy) Payload {
 	case DeployStalled:
 		h.Rest, icon = fmt.Sprintf("is still rolling out on %s after %s", cl.Name, short(v.Now.Sub(d.StartedAt))), iconWarn
 	case DeployHealthy:
-		h.Rest, icon = fmt.Sprintf("deployed to %s in %s", cl.Name, short(d.FinishedAt.Sub(d.StartedAt))), iconOK
+		h.Rest, icon = "deployed to "+cl.Name, iconOK
 	case DeployFailed:
 		h.Rest, icon = "failed to deploy to "+cl.Name, iconFail
 	case DeployUnhealthy:
@@ -272,7 +290,9 @@ func RenderDeploy(v View, d *Deploy) Payload {
 		h.Rest, icon = fmt.Sprintf("recovered on %s, %s after the deploy", cl.Name, short(d.FinishedAt.Sub(d.StartedAt))), iconOK
 	case DeploySuperseded:
 		h.Rest, icon = "deploy to "+cl.Name+" was replaced by a newer sync", iconMuted
-		h.Lead += "'s"
+		if h.Version == "" {
+			h.Lead += "'s"
+		}
 	}
 	trouble := d.State == DeployFailed || d.State == DeployUnhealthy
 	if v.Mute != nil && trouble {
@@ -299,31 +319,16 @@ func RenderDeploy(v View, d *Deploy) Payload {
 		}
 		children = append(children, section(strings.Join(lines, "\n")))
 	case d.State == DeployUnhealthy && d.Reason != nil && d.Reason.Summary != "":
-		children = append(children, section(escape(d.Reason.Summary)))
+		children = append(children, section(reasonSummary(d.Reason)))
 	}
 	if trouble && d.Reason != nil {
 		children = append(children, reasonBlocks(d.Reason)...)
 	}
-	switch d.State {
-	case DeploySyncing, DeployRolling, DeployStalled, DeployUnhealthy:
-		children = append(children, contextBlock(progressText(v, d)))
-	}
+	children = append(children, deployMiddle(v, d))
 	if trouble {
 		children = append(children, actions(button("Mute…", "mute_open", value(cl.Name, v.App, KindFailed), "")))
 	}
-	if line := commitLine(v.Cfg, d); line != "" {
-		children = append(children, contextBlock(line))
-	}
-	meta := []string{whoText(v.Cfg, d)}
-	if d.State == DeployFailed && !d.Baseline && len(d.Failures) > 0 {
-		meta = append(meta, fmt.Sprintf("%d attempt%s, nothing new rolled out", d.Attempts, plural(d.Attempts)))
-	}
-	meta = append(meta, d.FixedBy)
-	if v.Mute != nil {
-		meta = append(meta, v.Mute.Note())
-	}
-	meta = append(meta, linkText(v, d.RunURL))
-	children = append(children, contextBlock(dot(meta...)))
+	children = append(children, contextBlock(linkText(v, d.RunURL)))
 	return statusMessage(v, h, icon, d.Mention, children, moreMenu(v, kind),
 		&Metadata{EventType: "argocd_deploy", EventPayload: map[string]any{"id": d.ID, "cluster": cl.Name, "app": v.App, "state": string(d.State)}})
 }
@@ -338,47 +343,223 @@ func (r *Reason) healthWord() string {
 	return "degraded"
 }
 
-func commitLine(cfg Config, d *Deploy) string {
+// deployMiddle is the line under the heading, in normal text: what changed,
+// who shipped it and how it went, e.g. "v1.4.0 → v1.5.0 · started and
+// approved by mara-lee · 1m 15s". A single change's title goes on a second
+// line; several go in a thread reply instead.
+func deployMiddle(v View, d *Deploy) Block {
+	parts := []string{changeRange(v.Cfg, d), whoText(d)}
+	switch d.State {
+	case DeployHealthy:
+		parts = append(parts, short(d.FinishedAt.Sub(d.StartedAt)))
+	case DeploySyncing, DeployRolling, DeployStalled:
+		parts = append(parts, progressText(v, d))
+	case DeployFailed:
+		if !d.Baseline && len(d.Failures) > 0 {
+			parts = append(parts, fmt.Sprintf("%d attempt%s, nothing new rolled out", d.Attempts, plural(d.Attempts)))
+		}
+	}
+	parts = append(parts, d.FixedBy)
+	if v.Mute != nil {
+		parts = append(parts, lowerFirst(v.Mute.Note()))
+	}
+	lines := []string{dot(parts...)}
+	if len(d.Changes) == 0 {
+		lines = append(lines, titleLine(v.Cfg, d))
+	}
+	text := strings.TrimSpace(strings.Join(lines, "\n"))
+	if text == "" {
+		return nil
+	}
+	return section(text)
+}
+
+// changeRange is the version or commit before this deploy and after it,
+// linked to the comparison. Without a previous one it is the short commit.
+func changeRange(cfg Config, d *Deploy) string {
+	text, u := rangeOf(cfg, d)
+	if u != "" {
+		return "<" + u + "|" + text + ">"
+	}
+	return text
+}
+
+// rangeOf is changeRange's text and link.
+func rangeOf(cfg Config, d *Deploy) (text, link string) {
+	from, to, label := d.From.Version, d.Version, escape
+	if from == "" || to == "" || from == to {
+		from, to, label = d.From.Commit, d.Commit, shortSHA
+	}
+	if d.From.Repo != "" && d.Repo != "" && d.From.Repo != d.Repo {
+		from = ""
+	}
+	if from == "" || from == to {
+		return shortSHA(d.Commit), cfg.CommitURL(d.Repo, d.Commit)
+	}
+	return label(from) + " → " + label(to), cfg.CompareURL(d.Repo, from, to)
+}
+
+// compareURL links what changed in the deploy, or "".
+func compareURL(cfg Config, d *Deploy) string {
+	if text, u := rangeOf(cfg, d); strings.Contains(text, " → ") {
+		return u
+	}
+	return ""
+}
+
+// whoText is who shipped the deploy, e.g. "started and approved by mara-lee".
+func whoText(d *Deploy) string {
+	switch {
+	case d.Actor != "" && d.ApprovedBy != "" && strings.EqualFold(d.Actor, d.ApprovedBy):
+		return "started and approved by " + escape(d.Actor)
+	case d.Actor != "" && d.ApprovedBy != "":
+		return "by " + escape(d.Actor) + ", approved by " + escape(d.ApprovedBy)
+	case d.Actor != "":
+		return "by " + escape(d.Actor)
+	case d.ApprovedBy != "":
+		return "approved by " + escape(d.ApprovedBy)
+	case !d.Automated && d.Username != "":
+		return "synced by " + escape(d.Username)
+	}
+	return ""
+}
+
+// titleLine is the commit or pull request title, e.g. "#482 feat: one-tap
+// checkout".
+func titleLine(cfg Config, d *Deploy) string {
 	if d.Title == "" {
 		return ""
 	}
-	t := trimTo(d.Title, 200)
+	t := escape(trimTo(d.Title, 200))
 	if u := cfg.PRURL(d.Repo, d.PR); u != "" {
-		return fmt.Sprintf("<%s|%s #%s>", u, escape(t), d.PR)
+		return fmt.Sprintf("<%s|#%s> %s", u, d.PR, t)
 	}
 	if u := cfg.CommitURL(d.Repo, d.Commit); u != "" {
-		return fmt.Sprintf("<%s|%s>", u, escape(t))
+		return fmt.Sprintf("<%s|%s>", u, t)
 	}
 	if d.PR != "" {
-		return escape(t) + " #" + d.PR
+		return "#" + d.PR + " " + t
 	}
-	return escape(t)
+	return t
 }
 
-// whoText is the short commit and who shipped it, e.g. "4be81c0 by mara-lee".
-func whoText(cfg Config, d *Deploy) string {
-	sha := ""
-	if c := d.Commit; c != "" {
-		sha = shortSHA(c)
-		if u := cfg.CommitURL(d.Repo, c); u != "" {
-			sha = "<" + u + "|" + sha + ">"
+// maxChanges is how many changes the thread reply lists.
+const maxChanges = 10
+
+// RenderChanges draws the thread reply listing a deploy's changes, e.g.
+// "6 PRs in this deploy" and a line per pull request.
+func RenderChanges(v View, d *Deploy) Payload {
+	n := len(d.Changes)
+	noun := "change"
+	if allPRs(d.Changes) {
+		noun = "PR"
+	}
+	lead := fmt.Sprintf("%d %s%s", n, noun, plural(n))
+	text := lead + " in this deploy"
+	more := ""
+	if n > maxChanges {
+		more = fmt.Sprintf("and %d more", n-maxChanges)
+	}
+	moreURL := compareURL(v.Cfg, d)
+	shown := d.Changes[:min(n, maxChanges)]
+	if !v.Rich {
+		lines := []string{"*" + lead + "* in this deploy"}
+		for _, c := range shown {
+			id := escape(c.ID)
+			if c.URL != "" && id != "" {
+				id = "<" + c.URL + "|" + id + ">"
+			}
+			line := strings.TrimSpace("• *" + id + "* " + escape(c.Title))
+			if id == "" {
+				line = "• " + escape(c.Title)
+			}
+			if c.Author != "" {
+				line += "  _" + escape(c.Author) + "_"
+			}
+			lines = append(lines, line)
+		}
+		if more != "" {
+			if moreURL != "" {
+				more = "<" + moreURL + "|" + more + ">"
+			}
+			lines = append(lines, more)
+		}
+		return Payload{Text: text, Blocks: []Block{section(strings.Join(lines, "\n"))}}
+	}
+	var items []Block
+	for _, c := range shown {
+		var els []Block
+		switch {
+		case c.ID != "" && c.URL != "":
+			els = append(els, Block{"type": "link", "url": c.URL, "text": c.ID, "style": Block{"bold": true}}, Block{"type": "text", "text": "  "})
+		case c.ID != "":
+			els = append(els, Block{"type": "text", "text": c.ID, "style": Block{"bold": true}}, Block{"type": "text", "text": "  "})
+		}
+		els = append(els, codeSpans(trimTo(c.Title, 200))...)
+		if c.Author != "" {
+			els = append(els, Block{"type": "text", "text": "  " + c.Author, "style": Block{"italic": true}})
+		}
+		items = append(items, Block{"type": "rich_text_section", "elements": els})
+	}
+	elements := []Block{
+		{"type": "rich_text_section", "elements": []Block{
+			{"type": "text", "text": lead, "style": Block{"bold": true}},
+			{"type": "text", "text": " in this deploy\n"}}},
+		{"type": "rich_text_list", "style": "bullet", "indent": 0, "elements": items},
+	}
+	if more != "" {
+		m := Block{"type": "text", "text": more}
+		if moreURL != "" {
+			m = Block{"type": "link", "url": moreURL, "text": more}
+		}
+		elements = append(elements, Block{"type": "rich_text_section", "elements": []Block{m}})
+	}
+	return Payload{Text: text, Blocks: []Block{{"type": "rich_text", "elements": elements}}}
+}
+
+func allPRs(cs []Change) bool {
+	for _, c := range cs {
+		if !strings.HasPrefix(c.ID, "#") {
+			return false
 		}
 	}
-	who := ""
-	switch {
-	case d.Actor != "":
-		who = "by " + d.Actor
-	case !d.Automated && d.Username != "":
-		who = "synced by " + d.Username
-	}
-	return strings.TrimSpace(sha + " " + who)
+	return len(cs) > 0
 }
 
-// progressText is where a running deploy is, e.g. "Synced in 25s · rolling
+// codeSpans turns `code` in a title into rich text code style.
+func codeSpans(t string) []Block {
+	if strings.Count(t, "`")%2 != 0 {
+		return []Block{{"type": "text", "text": t}}
+	}
+	var out []Block
+	for i, part := range strings.Split(t, "`") {
+		if part == "" {
+			continue
+		}
+		el := Block{"type": "text", "text": part}
+		if i%2 == 1 {
+			el["style"] = Block{"code": true}
+		}
+		out = append(out, el)
+	}
+	return out
+}
+
+// RenderResync is the one thread reply that counts later syncs at the same
+// commit, edited as more arrive.
+func RenderResync(d *Deploy) string {
+	at := slackTime(d.ResyncAt, "{time}")
+	if d.Resyncs == 1 {
+		return fmt.Sprintf("Resynced at %s with no new commit; healthy.", at)
+	}
+	return fmt.Sprintf("Resynced %d times with no new commit, last at %s; healthy.", d.Resyncs, at)
+}
+
+// progressText is where a running deploy is, e.g. "synced in 25s, rolling
 // out 2/3 pods, 1m 05s so far".
 func progressText(v View, d *Deploy) string {
 	if d.SyncedAt.IsZero() {
-		s := "Syncing manifests"
+		s := "syncing manifests"
 		if d.Attempts > 1 {
 			s += fmt.Sprintf(", attempt %d", d.Attempts)
 		}
@@ -399,7 +580,21 @@ func progressText(v View, d *Deploy) string {
 	} else {
 		roll += ", " + short(v.Now.Sub(d.SyncedAt)) + " so far"
 	}
-	return "Synced in " + short(d.SyncedAt.Sub(d.StartedAt)) + " · " + roll
+	return "synced in " + short(d.SyncedAt.Sub(d.StartedAt)) + ", " + roll
+}
+
+// reasonSummary leads with the cause in bold and how many pods are ready,
+// e.g. "*CrashLoopBackOff*, 1 of 3 pods ready · 6 restarts · last exit 1".
+func reasonSummary(r *Reason) string {
+	head, rest, _ := strings.Cut(r.Summary, " · ")
+	s := "*" + escape(stripMrkdwn(head)) + "*"
+	if ready, total, ok := strings.Cut(r.Ready, "/"); ok {
+		s += fmt.Sprintf(", %s of %s pods ready", ready, total)
+	}
+	if rest != "" {
+		s += " · " + escape(rest)
+	}
+	return s
 }
 
 // reasonBlocks backs up the heading's reason with one log line and a grey
@@ -413,16 +608,10 @@ func reasonBlocks(r *Reason) []Block {
 	if r.Resource != "" {
 		detail = append(detail, r.Resource)
 	}
-	if r.Ready != "" {
-		detail = append(detail, r.Ready+" ready")
-	}
-	if r.Pods > 0 {
-		detail = append(detail, fmt.Sprintf("%d pod%s", r.Pods, plural(r.Pods)))
-	}
-	detail = append(detail, r.Details...)
 	if r.Image != "" {
 		detail = append(detail, r.Image)
 	}
+	detail = append(detail, r.Details...)
 	if len(detail) > 0 {
 		out = append(out, contextBlock(escape(dot(detail...))))
 	}
@@ -458,7 +647,7 @@ func RenderIncident(v View, inc *Incident) Payload {
 	if open {
 		if r := inc.Reason; r != nil {
 			if r.Summary != "" {
-				children = append(children, section(escape(r.Summary)))
+				children = append(children, section(reasonSummary(r)))
 			}
 			children = append(children, reasonBlocks(r)...)
 		}
