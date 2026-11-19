@@ -46,8 +46,7 @@ func Advance(cfg Config, rec *AppRecord, s Snapshot, now time.Time, baseline boo
 				rec.Deploy = baselineFailedDeploy(rec, s)
 			}
 		default:
-			startDeploy(rec, s, now)
-			st.NewDeploy = true
+			st.NewDeploy = startDeploy(rec, s, now)
 		}
 	}
 
@@ -101,7 +100,15 @@ func quietEntry(at time.Time, format string, args ...any) Entry {
 	return e
 }
 
-func startDeploy(rec *AppRecord, s Snapshot, now time.Time) {
+// startDeploy opens a deploy for a new sync and reports whether it did. A sync
+// of the commit an open deploy is already rolling out, such as Argo CD's
+// self-heal right after a sync, carries on that deploy instead.
+func startDeploy(rec *AppRecord, s Snapshot, now time.Time) bool {
+	if old := rec.Deploy; old != nil && !old.Baseline && !old.State.Final() && sameCommit(old, s) {
+		old.OpStartedAt = s.Op.StartedAt
+		old.Timeline = append(old.Timeline, quietEntry(s.Op.StartedAt, "Synced again at the same commit."))
+		return false
+	}
 	if old := rec.Deploy; old != nil {
 		if !old.State.Final() {
 			old.State = DeploySuperseded
@@ -141,6 +148,23 @@ func startDeploy(rec *AppRecord, s Snapshot, now time.Time) {
 		d.Quiet = true
 	}
 	rec.Deploy = d
+	return true
+}
+
+func sameCommit(d *Deploy, s Snapshot) bool {
+	if d.Commit != "" && s.Commit != "" {
+		return d.Commit == s.Commit
+	}
+	return d.Revision != "" && d.Revision == s.Op.Revision
+}
+
+// follows reports whether op is the sync d is tracking.
+func (d *Deploy) follows(op *Operation) bool {
+	at := d.OpStartedAt
+	if at.IsZero() {
+		at = d.StartedAt
+	}
+	return op != nil && op.StartedAt.Equal(at)
 }
 
 func baselineFailedDeploy(rec *AppRecord, s Snapshot) *Deploy {
@@ -163,9 +187,10 @@ func baselineFailedDeploy(rec *AppRecord, s Snapshot) *Deploy {
 
 func advanceDeploy(cfg Config, rec *AppRecord, d *Deploy, s Snapshot, now time.Time, st *Step) {
 	op := s.Op
-	if op == nil || !op.StartedAt.Equal(d.StartedAt) {
+	if !d.follows(op) {
 		return
 	}
+	resync := !op.StartedAt.Equal(d.StartedAt)
 	set := func(state DeployState, format string, args ...any) {
 		if d.State == state {
 			return
@@ -178,11 +203,13 @@ func advanceDeploy(cfg Config, rec *AppRecord, d *Deploy, s Snapshot, now time.T
 	}
 	switch {
 	case op.Phase == "Running" || op.Phase == "Terminating":
-		if n := op.RetryCount + 1; n != d.Attempts {
+		if n := op.RetryCount + 1; n != d.Attempts && !resync {
 			d.Attempts, d.Dirty = n, true
 			d.Timeline = append(d.Timeline, quietEntry(now, "Attempt %d.", n))
 		}
-		set(DeploySyncing, "")
+		if d.SyncedAt.IsZero() {
+			set(DeploySyncing, "")
+		}
 	case failedPhase(op.Phase):
 		if d.State != DeployFailed {
 			d.FinishedAt = op.FinishedAt

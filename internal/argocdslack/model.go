@@ -63,13 +63,14 @@ func (s DeployState) Final() bool {
 
 // Deploy is one sync operation of one app.
 type Deploy struct {
-	ID         string      `json:"id"`
-	State      DeployState `json:"state"`
-	StartedAt  time.Time   `json:"started_at"`
-	SyncedAt   time.Time   `json:"synced_at,omitzero"`
-	HealthyAt  time.Time   `json:"healthy_at,omitzero"`
-	FinishedAt time.Time   `json:"finished_at,omitzero"`
-	DegradedAt time.Time   `json:"degraded_at,omitzero"`
+	ID          string      `json:"id"`
+	State       DeployState `json:"state"`
+	StartedAt   time.Time   `json:"started_at"`
+	OpStartedAt time.Time   `json:"op_started_at,omitzero"` // a later sync of the same commit it follows
+	SyncedAt    time.Time   `json:"synced_at,omitzero"`
+	HealthyAt   time.Time   `json:"healthy_at,omitzero"`
+	FinishedAt  time.Time   `json:"finished_at,omitzero"`
+	DegradedAt  time.Time   `json:"degraded_at,omitzero"`
 
 	Revision  string   `json:"revision,omitempty"`
 	Repo      string   `json:"repo,omitempty"`

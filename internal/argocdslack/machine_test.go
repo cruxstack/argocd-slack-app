@@ -137,6 +137,41 @@ func TestDeployLifecycle(t *testing.T) {
 	}
 }
 
+func TestDeployCarriesOnThroughASyncOfTheSameCommit(t *testing.T) {
+	cfg := testConfig(t)
+	rec := &AppRecord{Cluster: "dev-use1", App: "api", OpStartedAt: t0.Add(-time.Hour)}
+	first := op("Succeeded", at(0), at(0).Add(4*time.Second))
+	Advance(cfg, rec, snap("Healthy", op("Running", at(0), time.Time{})), at(0), false)
+	Advance(cfg, rec, snap("Progressing", first), at(0).Add(5*time.Second), false)
+	id := rec.Deploy.ID
+
+	// Argo CD's self-heal re-applies a few resources a second later, at a
+	// revision another app's commit moved on.
+	heal := op("Running", at(0).Add(6*time.Second), time.Time{})
+	heal.Revision = "def"
+	st := Advance(cfg, rec, snap("Progressing", heal), at(0).Add(6*time.Second), false)
+	if st.NewDeploy || rec.Deploy.ID != id || rec.LastDeploy != nil {
+		t.Fatalf("a sync of the same commit should carry on the deploy, got %+v", rec.Deploy)
+	}
+	if rec.Deploy.State != DeployRolling {
+		t.Fatalf("the deploy should keep rolling, got %s", rec.Deploy.State)
+	}
+	heal.Phase, heal.FinishedAt = "Succeeded", at(0).Add(7*time.Second)
+	Advance(cfg, rec, snap("Healthy", heal), at(1), false)
+	if rec.Deploy.State != DeployHealthy || rec.Deploy.FinishedAt.Sub(rec.Deploy.StartedAt) != time.Minute {
+		t.Fatalf("want one healthy deploy timed from the first sync, got %+v", rec.Deploy)
+	}
+
+	// A new commit still replaces a deploy in progress.
+	rec = &AppRecord{Cluster: "dev-use1", App: "api", OpStartedAt: t0.Add(-time.Hour)}
+	Advance(cfg, rec, snap("Progressing", op("Running", at(2), time.Time{})), at(2), false)
+	next := snap("Progressing", op("Running", at(3), time.Time{}))
+	next.Commit = "9a8b7c60000"
+	if st := Advance(cfg, rec, next, at(3), false); !st.NewDeploy || rec.LastDeploy == nil || rec.LastDeploy.State != DeploySuperseded {
+		t.Fatalf("a new commit should replace the open deploy, got %+v", rec.LastDeploy)
+	}
+}
+
 func TestDeployUnhealthyThenRecovered(t *testing.T) {
 	cfg := testConfig(t)
 	rec := &AppRecord{Cluster: "dev-use1", App: "api", OpStartedAt: t0.Add(-time.Hour)}
