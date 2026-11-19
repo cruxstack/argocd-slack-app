@@ -227,10 +227,16 @@ func TestQuietResyncAtSameCommit(t *testing.T) {
 	if !rec.Deploy.Quiet {
 		t.Fatal("same-commit resync should be quiet")
 	}
-	Advance(cfg, rec, snap("Healthy", op("Succeeded", at(0), at(0).Add(time.Second))), at(1), false)
+	done := snap("Healthy", op("Succeeded", at(0), at(0).Add(time.Second)))
+	Advance(cfg, rec, done, at(1), false)
 	last := rec.LastDeploy
+	if last.Resyncs != 0 {
+		t.Fatal("a resync waits out the annotation lag before it counts")
+	}
+	Advance(cfg, rec, done, at(5), false)
+	Advance(cfg, rec, done, at(6), false)
 	if !last.Dirty || last.Resyncs != 1 || !last.ResyncAt.Equal(at(0)) {
-		t.Fatalf("resync should count on the previous deploy, got %+v", last)
+		t.Fatalf("resync should count once on the previous deploy, got %+v", last)
 	}
 }
 

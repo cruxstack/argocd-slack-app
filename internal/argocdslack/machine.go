@@ -2,6 +2,7 @@ package argocdslack
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 )
@@ -51,7 +52,11 @@ func Advance(cfg Config, rec *AppRecord, s Snapshot, now time.Time, baseline boo
 	}
 
 	if d := rec.Deploy; d != nil && !d.Baseline {
+		lateRelease(cfg, rec, d, s, now, &st)
 		advanceDeploy(cfg, rec, d, s, now, &st)
+		if d.Quiet && d.State == DeployHealthy && now.Sub(d.StartedAt) >= cfg.Grace.AnnotationLag.Duration {
+			countResync(rec, d)
+		}
 	} else if d != nil && d.Baseline {
 		d.Health = s.Health
 	}
@@ -61,6 +66,9 @@ func Advance(cfg Config, rec *AppRecord, s Snapshot, now time.Time, baseline boo
 
 	if d := rec.Deploy; d != nil && (d.Quiet || !d.Dirty) && (d.State == DeployHealthy || d.State == DeployRecovered || d.State == DeploySuperseded) &&
 		now.Sub(d.FinishedAt) > cfg.Grace.DeployWindow.Duration {
+		if d.Quiet && d.State == DeployHealthy {
+			countResync(rec, d)
+		}
 		if !d.Quiet || d.Msg.Posted() {
 			rec.LastDeploy = d
 		}
@@ -128,6 +136,9 @@ func startDeploy(rec *AppRecord, s Snapshot, now time.Time) bool {
 	}
 	from := rec.running()
 	if old := rec.Deploy; old != nil {
+		if old.Quiet && old.State == DeployHealthy {
+			countResync(rec, old)
+		}
 		if !old.State.Final() {
 			old.State = DeploySuperseded
 			old.FinishedAt = now
@@ -171,6 +182,50 @@ func startDeploy(rec *AppRecord, s Snapshot, now time.Time) bool {
 	}
 	rec.Deploy = d
 	return true
+}
+
+// lateRelease takes release annotations that change after the sync started.
+// An ApplicationSet can rewrite them minutes after Argo CD synced the new
+// manifests, so a deploy that began naming the release already running takes
+// the new ones while it still follows that sync.
+func lateRelease(cfg Config, rec *AppRecord, d *Deploy, s Snapshot, now time.Time, st *Step) {
+	if !d.follows(s.Op) || s.Commit == "" || now.Sub(d.StartedAt) > cfg.Grace.AnnotationLag.Duration {
+		return
+	}
+	if d.Commit != "" && d.Commit != d.From.Commit {
+		return
+	}
+	if s.Repo == d.Repo && s.Commit == d.Commit && s.Version == d.Version && s.RunURL == d.RunURL {
+		return
+	}
+	d.Repo, d.Commit, d.Version, d.RunURL = s.Repo, s.Commit, s.Version, s.RunURL
+	d.Actor, d.ApprovedBy, d.PR, d.Title = s.Actor, s.ApprovedBy, s.PR, s.CommitTitle
+	if !slices.Equal(d.Changes, s.Changes) {
+		d.Changes, d.ChangesPosted = s.Changes, false
+	}
+	d.Dirty = true
+	d.Timeline = append(d.Timeline, quietEntry(now, "Release annotations changed after the sync started."))
+	if d.Quiet {
+		d.Quiet = false
+		st.NewDeploy = true
+	}
+	if d.State == DeployHealthy || d.State == DeployRecovered {
+		rec.Running = d.Release()
+	}
+}
+
+// countResync notes a quiet resync on the deploy it repeats, once late
+// annotations could no longer have shown it to be a new release.
+func countResync(rec *AppRecord, d *Deploy) {
+	if d.Noted {
+		return
+	}
+	d.Noted = true
+	if last := rec.LastDeploy; last != nil && last.Msg.Posted() {
+		last.Resyncs++
+		last.ResyncAt = d.StartedAt
+		last.Dirty = true
+	}
 }
 
 func sameCommit(d *Deploy, s Snapshot) bool {
@@ -273,11 +328,6 @@ func advanceDeploy(cfg Config, rec *AppRecord, d *Deploy, s Snapshot, now time.T
 				d.Progress = ""
 				set(DeployHealthy, "Healthy %s after the sync started.", short(d.HealthyAt.Sub(d.StartedAt)))
 				rec.Running = d.Release()
-				if last := rec.LastDeploy; d.Quiet && last != nil && last.Msg.Posted() {
-					last.Resyncs++
-					last.ResyncAt = d.StartedAt
-					last.Dirty = true
-				}
 			case DeployUnhealthy:
 				d.FinishedAt = now
 				set(DeployRecovered, "Healthy again after %s.", short(now.Sub(d.DegradedAt)))

@@ -96,13 +96,21 @@ func (w *worker) thread(ctx context.Context, m Message, entries []Entry) {
 // reply counting resyncs at the same commit.
 func (w *worker) deployReplies(ctx context.Context, v View, d *Deploy) {
 	if len(d.Changes) > 0 && !d.ChangesPosted {
-		_, err := w.post(ctx, d.Msg.Channel, func(rich bool) Payload {
+		render := func(rich bool) Payload {
 			vv := v
 			vv.Rich = rich
-			p := RenderChanges(vv, d)
-			p.ThreadTS = d.Msg.TS
-			return p
-		})
+			return RenderChanges(vv, d)
+		}
+		var err error
+		if d.ChangesMsg.Posted() {
+			err = w.update(ctx, d.ChangesMsg, render)
+		} else {
+			d.ChangesMsg, err = w.post(ctx, d.Msg.Channel, func(rich bool) Payload {
+				p := render(rich)
+				p.ThreadTS = d.Msg.TS
+				return p
+			})
+		}
 		if err != nil {
 			w.a.Log.Warn("changes reply failed", "error", err)
 		} else {
