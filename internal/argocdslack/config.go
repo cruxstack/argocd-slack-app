@@ -49,6 +49,7 @@ type Grace struct {
 	Stall          Duration `json:"stall"`
 	LongRunning    Duration `json:"long_running"`
 	PreviewCleanup Duration `json:"preview_cleanup"`
+	AnnotationLag  Duration `json:"annotation_lag"`
 }
 
 // Annotations names the Application annotations that carry deploy metadata.
@@ -150,6 +151,7 @@ func LoadConfig(raw string) (Config, error) {
 	def(&c.Grace.Stall, 15*time.Minute)
 	def(&c.Grace.LongRunning, 24*time.Hour)
 	def(&c.Grace.PreviewCleanup, 72*time.Hour)
+	def(&c.Grace.AnnotationLag, 5*time.Minute)
 	if c.WatchSeconds <= 0 || c.WatchSeconds > 58 {
 		c.WatchSeconds = 55
 	}

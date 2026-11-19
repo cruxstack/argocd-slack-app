@@ -113,6 +113,7 @@ type Deploy struct {
 	FixedBy   string   `json:"fixed_by,omitempty"`
 	Baseline  bool     `json:"baseline,omitempty"`
 	Quiet     bool     `json:"quiet,omitempty"` // resync at an unchanged commit: thread note only
+	Noted     bool     `json:"noted,omitempty"` // quiet resync counted on the deploy it repeats
 
 	Msg      Message `json:"msg,omitzero"`
 	Timeline []Entry `json:"timeline,omitempty"`
@@ -122,6 +123,7 @@ type Deploy struct {
 	Mention  string  `json:"mention,omitempty"`
 
 	ChangesPosted bool      `json:"changes_posted,omitempty"`
+	ChangesMsg    Message   `json:"changes_msg,omitzero"`
 	Resyncs       int       `json:"resyncs,omitempty"` // later syncs at the same commit, in one edited reply
 	ResyncAt      time.Time `json:"resync_at,omitzero"`
 	ResyncMsg     Message   `json:"resync_msg,omitzero"`

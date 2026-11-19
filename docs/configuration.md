@@ -37,6 +37,7 @@ Durations accept Go syntax (`90s`, `5m`, `1h`) plus `d` and `w`.
 | `stall`           | `15m`   | A rollout still progressing after this is shown as stalled.           |
 | `long_running`    | `24h`   | Incidents older than this go in the digest.                           |
 | `preview_cleanup` | `72h`   | Previews unhealthy this long are flagged as cleanup candidates.       |
+| `annotation_lag`  | `5m`    | Annotations changed this soon after a sync started still describe it. |
 
 ## Deploy metadata (`annotations`)
 
