@@ -1,6 +1,7 @@
 package argocdslack
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"regexp"
 	"strings"
@@ -24,11 +25,14 @@ type Snapshot struct {
 
 	Repo        string
 	Commit      string
+	Version     string
 	Images      []string
 	Actor       string
+	ApprovedBy  string
 	PR          string
 	CommitTitle string
 	RunURL      string
+	Changes     []Change
 
 	Culprit   *ResourceRef
 	Resources []ResourceRef
@@ -189,11 +193,14 @@ func ParseApplication(b []byte, ann Annotations) (Snapshot, error) {
 		Revision:        a.Status.Sync.Revision,
 		Repo:            repoName(get(ann.Repo)),
 		Commit:          get(ann.Commit),
+		Version:         get(ann.Version),
 		Images:          a.Status.Summary.Images,
 		Actor:           get(ann.Actor),
+		ApprovedBy:      get(ann.ApprovedBy),
 		PR:              strings.TrimPrefix(get(ann.PR), "#"),
 		CommitTitle:     get(ann.Title),
 		RunURL:          get(ann.RunURL),
+		Changes:         parseChanges(get(ann.Changes)),
 	}
 	if s.Repo == "" && s.Commit == "" {
 		switch {
@@ -234,6 +241,32 @@ func ParseApplication(b []byte, ann Annotations) (Snapshot, error) {
 		s.Op = op
 	}
 	return s, nil
+}
+
+// parseChanges reads a JSON array of changes, plain or base64-encoded so it
+// survives YAML templating. Anything else counts as no changes.
+func parseChanges(v string) []Change {
+	if v == "" {
+		return nil
+	}
+	b := []byte(v)
+	if v[0] != '[' {
+		var err error
+		if b, err = base64.StdEncoding.DecodeString(v); err != nil {
+			return nil
+		}
+	}
+	var out []Change
+	if json.Unmarshal(b, &out) != nil {
+		return nil
+	}
+	keep := out[:0]
+	for _, c := range out {
+		if c.Title = strings.TrimSpace(c.Title); c.Title != "" {
+			keep = append(keep, c)
+		}
+	}
+	return keep
 }
 
 // FailedResults are hook or resource failures worth showing.

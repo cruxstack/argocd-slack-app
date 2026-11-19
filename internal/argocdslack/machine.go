@@ -66,7 +66,24 @@ func Advance(cfg Config, rec *AppRecord, s Snapshot, now time.Time, baseline boo
 		}
 		rec.Deploy = nil
 	}
+	// An app first seen settled gives later deploys something to compare to.
+	if rec.Running == (Release{}) && rec.Deploy == nil && s.Sync == "Synced" && healthyish(s.Health) && (s.Op == nil || s.Op.Phase == "Succeeded") {
+		rec.Running = Release{Repo: s.Repo, Commit: s.Commit, Version: s.Version}
+	}
 	return st
+}
+
+// running is what the app last deployed successfully.
+func (rec *AppRecord) running() Release {
+	if rec.Running != (Release{}) {
+		return rec.Running
+	}
+	for _, d := range []*Deploy{rec.Deploy, rec.LastDeploy} {
+		if d != nil && (d.State == DeployHealthy || d.State == DeployRecovered) {
+			return d.Release()
+		}
+	}
+	return Release{}
 }
 
 func healthyish(h string) bool { return h == "Healthy" || h == "Suspended" }
@@ -109,6 +126,7 @@ func startDeploy(rec *AppRecord, s Snapshot, now time.Time) bool {
 		old.Timeline = append(old.Timeline, quietEntry(s.Op.StartedAt, "Synced again at the same commit."))
 		return false
 	}
+	from := rec.running()
 	if old := rec.Deploy; old != nil {
 		if !old.State.Final() {
 			old.State = DeploySuperseded
@@ -122,21 +140,25 @@ func startDeploy(rec *AppRecord, s Snapshot, now time.Time) bool {
 	}
 	op := s.Op
 	d := &Deploy{
-		ID:        fmt.Sprintf("%s/%s/%d", rec.Cluster, rec.App, op.StartedAt.Unix()),
-		State:     DeploySyncing,
-		StartedAt: op.StartedAt,
-		Revision:  op.Revision,
-		Repo:      s.Repo,
-		Commit:    s.Commit,
-		Images:    s.Images,
-		Actor:     s.Actor,
-		PR:        s.PR,
-		Title:     s.CommitTitle,
-		RunURL:    s.RunURL,
-		Automated: op.Automated,
-		Username:  op.Username,
-		Attempts:  op.RetryCount + 1,
-		Dirty:     true,
+		ID:         fmt.Sprintf("%s/%s/%d", rec.Cluster, rec.App, op.StartedAt.Unix()),
+		State:      DeploySyncing,
+		StartedAt:  op.StartedAt,
+		Revision:   op.Revision,
+		Repo:       s.Repo,
+		Commit:     s.Commit,
+		Version:    s.Version,
+		From:       from,
+		Images:     s.Images,
+		Actor:      s.Actor,
+		ApprovedBy: s.ApprovedBy,
+		PR:         s.PR,
+		Title:      s.CommitTitle,
+		RunURL:     s.RunURL,
+		Changes:    s.Changes,
+		Automated:  op.Automated,
+		Username:   op.Username,
+		Attempts:   op.RetryCount + 1,
+		Dirty:      true,
 	}
 	who := "automated"
 	if !op.Automated && op.Username != "" {
@@ -250,13 +272,16 @@ func advanceDeploy(cfg Config, rec *AppRecord, d *Deploy, s Snapshot, now time.T
 				d.FinishedAt = d.HealthyAt
 				d.Progress = ""
 				set(DeployHealthy, "Healthy %s after the sync started.", short(d.HealthyAt.Sub(d.StartedAt)))
+				rec.Running = d.Release()
 				if last := rec.LastDeploy; d.Quiet && last != nil && last.Msg.Posted() {
-					last.Timeline = append(last.Timeline, entry(now, "Resynced %s with no new commit; healthy.", slackTime(d.StartedAt, "{time}")))
+					last.Resyncs++
+					last.ResyncAt = d.StartedAt
 					last.Dirty = true
 				}
 			case DeployUnhealthy:
 				d.FinishedAt = now
 				set(DeployRecovered, "Healthy again after %s.", short(now.Sub(d.DegradedAt)))
+				rec.Running = d.Release()
 			}
 		case s.Unhealthy():
 			if d.DegradedAt.IsZero() {
@@ -289,16 +314,19 @@ func advanceDeploy(cfg Config, rec *AppRecord, d *Deploy, s Snapshot, now time.T
 		}
 	}
 	if d.State == DeployHealthy && rec.LastDeploy != nil && rec.LastDeploy.State == DeployFailed && rec.LastDeploy.FixedBy == "" {
-		rec.LastDeploy.FixedBy = fmt.Sprintf("Fixed by the %s deploy%s", slackTime(d.HealthyAt, "{time}"), commitSuffix(d.Commit))
+		rec.LastDeploy.FixedBy = fmt.Sprintf("fixed by the %s deploy%s", slackTime(d.HealthyAt, "{time}"), releaseSuffix(d))
 		rec.LastDeploy.Dirty = true
 	}
 }
 
-func commitSuffix(commit string) string {
-	if commit == "" {
-		return ""
+func releaseSuffix(d *Deploy) string {
+	switch {
+	case d.Version != "":
+		return " of " + d.Version
+	case d.Commit != "":
+		return " of " + shortSHA(d.Commit)
 	}
-	return " of " + shortSHA(commit)
+	return ""
 }
 
 func advanceIncident(cfg Config, rec *AppRecord, s Snapshot, now time.Time, baseline, allowOpen bool, st *Step) {

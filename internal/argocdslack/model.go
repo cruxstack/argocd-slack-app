@@ -15,12 +15,29 @@ type AppRecord struct {
 	LastSeen       time.Time `json:"last_seen,omitzero"`
 	MissingPolls   int       `json:"missing_polls,omitempty"`
 
+	Running      Release   `json:"running,omitzero"` // what the last healthy deploy left running
 	Deploy       *Deploy   `json:"deploy,omitempty"`
 	LastDeploy   *Deploy   `json:"last_deploy,omitempty"`
 	Incident     *Incident `json:"incident,omitempty"`
 	LastIncident *Incident `json:"last_incident,omitempty"`
 
 	Version int64 `json:"-"`
+}
+
+// Release is what a deploy put on the cluster.
+type Release struct {
+	Repo    string `json:"repo,omitempty"`
+	Commit  string `json:"commit,omitempty"`
+	Version string `json:"version,omitempty"`
+}
+
+// Change is one pull request or commit in a deploy, from the changes
+// annotation.
+type Change struct {
+	ID     string `json:"id,omitempty"` // "#482"
+	Title  string `json:"title"`
+	URL    string `json:"url,omitempty"`
+	Author string `json:"author,omitempty"`
 }
 
 // Message is a posted Slack message.
@@ -72,16 +89,20 @@ type Deploy struct {
 	FinishedAt  time.Time   `json:"finished_at,omitzero"`
 	DegradedAt  time.Time   `json:"degraded_at,omitzero"`
 
-	Revision  string   `json:"revision,omitempty"`
-	Repo      string   `json:"repo,omitempty"`
-	Commit    string   `json:"commit,omitempty"`
-	Images    []string `json:"images,omitempty"`
-	Actor     string   `json:"actor,omitempty"`
-	PR        string   `json:"pr,omitempty"`
-	Title     string   `json:"title,omitempty"`
-	RunURL    string   `json:"run_url,omitempty"`
-	Automated bool     `json:"automated,omitempty"`
-	Username  string   `json:"username,omitempty"`
+	Revision   string   `json:"revision,omitempty"`
+	Repo       string   `json:"repo,omitempty"`
+	Commit     string   `json:"commit,omitempty"`
+	Version    string   `json:"version,omitempty"`
+	From       Release  `json:"from,omitzero"` // what was running before
+	Images     []string `json:"images,omitempty"`
+	Actor      string   `json:"actor,omitempty"`
+	ApprovedBy string   `json:"approved_by,omitempty"`
+	PR         string   `json:"pr,omitempty"`
+	Title      string   `json:"title,omitempty"`
+	RunURL     string   `json:"run_url,omitempty"`
+	Changes    []Change `json:"changes,omitempty"`
+	Automated  bool     `json:"automated,omitempty"`
+	Username   string   `json:"username,omitempty"`
 
 	Attempts  int      `json:"attempts,omitempty"`
 	Progress  string   `json:"progress,omitempty"` // "2/4"
@@ -99,6 +120,17 @@ type Deploy struct {
 	Muted    bool    `json:"muted,omitempty"`
 	MuteNote string  `json:"mute_note,omitempty"`
 	Mention  string  `json:"mention,omitempty"`
+
+	ChangesPosted bool      `json:"changes_posted,omitempty"`
+	Resyncs       int       `json:"resyncs,omitempty"` // later syncs at the same commit, in one edited reply
+	ResyncAt      time.Time `json:"resync_at,omitzero"`
+	ResyncMsg     Message   `json:"resync_msg,omitzero"`
+	ResyncShown   int       `json:"resync_shown,omitempty"`
+}
+
+// Release is what the deploy put on the cluster.
+func (d *Deploy) Release() Release {
+	return Release{Repo: d.Repo, Commit: d.Commit, Version: d.Version}
 }
 
 // IncidentState is where an incident message stands.

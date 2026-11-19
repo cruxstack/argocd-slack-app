@@ -196,12 +196,12 @@ func (b *demoBuilder) emit(at time.Duration, extra func(f *demoFrame)) {
 	b.frames = append(b.frames, f)
 }
 
-// deploy starts a sync of a new commit.
-func (b *demoBuilder) deploy(app string, at time.Duration, commit, actor, pr, title, image string) {
+// deploy starts a sync of a new version.
+func (b *demoBuilder) deploy(app string, at time.Duration, version, commit, actor, pr, title, image string) {
 	b.set(app, func(s *Snapshot) {
 		s.Op = &Operation{Phase: "Running", StartedAt: b.t(at), Revision: commit, Automated: true}
-		s.Commit, s.Revision, s.Actor, s.PR, s.CommitTitle, s.Images = commit, commit, actor, pr, title, []string{image}
-		s.Sync = "OutOfSync"
+		s.Version, s.Commit, s.Revision, s.Actor, s.PR, s.CommitTitle, s.Images = version, commit, commit, actor, pr, title, []string{image}
+		s.ApprovedBy, s.Changes, s.Sync = "", nil, "OutOfSync"
 	})
 }
 
@@ -232,6 +232,9 @@ func demoFrames(start time.Time, user string) []demoFrame {
 	for app, ns := range cast {
 		b.snaps[app] = Snapshot{App: app, Namespace: ns, Health: "Healthy", Sync: "Synced", Repo: "acme/" + strings.SplitN(app, "-", 2)[0]}
 	}
+	for app, v := range map[string][2]string{"checkout-api": {"v2.13.2", "1f0c9e2d4a"}, "payments-worker": {"v5.2.4", "8b1d2e3f4a"}, "search-indexer": {"v1.8.3", "5c6d7e8f9a"}} {
+		b.set(app, func(s *Snapshot) { s.Version, s.Commit = v[0], v[1] })
+	}
 
 	// Already broken when the app starts watching: one crash-looping app and
 	// one whose last sync failed two days ago.
@@ -248,8 +251,16 @@ func demoFrames(start time.Time, user string) []demoFrame {
 	b.emit(0, func(f *demoFrame) { f.Baseline = true })
 
 	// A deploy that rolls out pod by pod, and one whose migration fails.
-	b.deploy("checkout-api", 1*m, "4be81c07d2", "mara-lee", "482", "feat: one-tap checkout for returning customers", "checkout-api:2.14.0")
-	b.deploy("payments-worker", 1*m, "c71d09ae35", "dev-okafor", "219", "chore: add an index on ledger_entries", "payments-worker:5.3.0")
+	b.deploy("checkout-api", 1*m, "v2.14.0", "4be81c07d2", "mara-lee", "", "", "checkout-api:2.14.0")
+	b.set("checkout-api", func(s *Snapshot) {
+		s.ApprovedBy = "mara-lee"
+		s.Changes = []Change{
+			{ID: "#482", Title: "feat: one-tap checkout for returning customers", URL: "https://github.com/acme/checkout/pull/482", Author: "mara-lee"},
+			{ID: "#479", Title: "fix: keep the cart when a session refreshes", URL: "https://github.com/acme/checkout/pull/479", Author: "jun-park"},
+			{ID: "#476", Title: "chore: bump `stripe-go` to v82", URL: "https://github.com/acme/checkout/pull/476", Author: "dev-okafor"},
+		}
+	})
+	b.deploy("payments-worker", 1*m, "v5.3.0", "c71d09ae35", "dev-okafor", "219", "chore: add an index on ledger_entries", "payments-worker:5.3.0")
 	b.emit(1*m, nil)
 
 	b.synced("checkout-api", 1*m+25*time.Second, "Progressing")
@@ -276,7 +287,7 @@ func demoFrames(start time.Time, user string) []demoFrame {
 	})
 	b.reasons["payments-worker"] = &Reason{Category: CatHook, Resource: "Job payments/payments-migrate", Summary: "PreSync hook failed · exit 1",
 		Excerpt: `ERROR: relation "ledger_entries_account_idx" already exists`, Pods: 1}
-	b.deploy("search-indexer", 3*m+30*time.Second, "e09a6f3b18", "jun-park", "77", "feat: index product reviews", "search-indexer:1.9.0")
+	b.deploy("search-indexer", 3*m+30*time.Second, "v1.9.0", "e09a6f3b18", "jun-park", "77", "feat: index product reviews", "search-indexer:1.9.0")
 	b.emit(3*m+30*time.Second, nil)
 
 	// A deploy that syncs, then runs out of memory.
@@ -292,7 +303,7 @@ func demoFrames(start time.Time, user string) []demoFrame {
 	// web-frontend has been degraded for five minutes, so its incident opens.
 	b.emit(7*m, nil)
 
-	b.deploy("payments-worker", 8*m, "d4a2b7c901", "dev-okafor", "221", "fix: make the ledger_entries migration idempotent", "payments-worker:5.3.1")
+	b.deploy("payments-worker", 8*m, "v5.3.1", "d4a2b7c901", "dev-okafor", "221", "fix: make the ledger_entries migration idempotent", "payments-worker:5.3.1")
 	delete(b.reasons, "payments-worker")
 	b.emit(8*m, func(f *demoFrame) { f.Acks = []string{"web-frontend"} })
 

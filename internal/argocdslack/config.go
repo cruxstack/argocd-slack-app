@@ -54,18 +54,23 @@ type Grace struct {
 // Annotations names the Application annotations that carry deploy metadata.
 // Empty names fall back to what Argo CD records itself.
 type Annotations struct {
-	Repo   string `json:"repo"`
-	Commit string `json:"commit"`
-	Actor  string `json:"actor"`
-	PR     string `json:"pr"`
-	Title  string `json:"title"`
-	RunURL string `json:"run_url"`
+	Repo       string `json:"repo"`
+	Commit     string `json:"commit"`
+	Version    string `json:"version"`
+	Actor      string `json:"actor"`
+	ApprovedBy string `json:"approved_by"`
+	PR         string `json:"pr"`
+	Title      string `json:"title"`
+	RunURL     string `json:"run_url"`
+	Changes    string `json:"changes"`
 }
 
-// SCM builds commit and pull request links from {repo}, {commit} and {pr}.
+// SCM builds links from {repo}, {commit}, {pr}, {version}, {from} and {to}.
 type SCM struct {
-	CommitURL string `json:"commit_url"`
-	PRURL     string `json:"pr_url"`
+	CommitURL  string `json:"commit_url"`
+	PRURL      string `json:"pr_url"`
+	VersionURL string `json:"version_url"`
+	CompareURL string `json:"compare_url"`
 }
 
 // Link is a button on every message; URL is a template.
@@ -159,6 +164,9 @@ func LoadConfig(raw string) (Config, error) {
 	}
 	if c.SCM.PRURL == "" {
 		c.SCM.PRURL = "https://github.com/{repo}/pull/{pr}"
+	}
+	if c.SCM.CompareURL == "" {
+		c.SCM.CompareURL = "https://github.com/{repo}/compare/{from}...{to}"
 	}
 	if c.Setup.AppName == "" {
 		c.Setup.AppName = "Argo CD"
@@ -321,6 +329,22 @@ func (c Config) PRURL(repo, pr string) string {
 		return ""
 	}
 	return expandRaw(c.SCM.PRURL, map[string]string{"repo": repo, "pr": pr})
+}
+
+// VersionURL links a version, or "" without a repo, version and template.
+func (c Config) VersionURL(repo, version string) string {
+	if repo == "" || version == "" || c.SCM.VersionURL == "" {
+		return ""
+	}
+	return expandRaw(c.SCM.VersionURL, map[string]string{"repo": repo, "version": version})
+}
+
+// CompareURL links the changes between two versions or commits.
+func (c Config) CompareURL(repo, from, to string) string {
+	if repo == "" || from == "" || to == "" || c.SCM.CompareURL == "" {
+		return ""
+	}
+	return expandRaw(c.SCM.CompareURL, map[string]string{"repo": repo, "from": from, "to": to})
 }
 
 // expandRaw fills placeholders without escaping, so repo names keep their slash.

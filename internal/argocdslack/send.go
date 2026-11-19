@@ -92,6 +92,42 @@ func (w *worker) thread(ctx context.Context, m Message, entries []Entry) {
 	}
 }
 
+// deployReplies lists a deploy's changes once in its thread and keeps one
+// reply counting resyncs at the same commit.
+func (w *worker) deployReplies(ctx context.Context, v View, d *Deploy) {
+	if len(d.Changes) > 0 && !d.ChangesPosted {
+		_, err := w.post(ctx, d.Msg.Channel, func(rich bool) Payload {
+			vv := v
+			vv.Rich = rich
+			p := RenderChanges(vv, d)
+			p.ThreadTS = d.Msg.TS
+			return p
+		})
+		if err != nil {
+			w.a.Log.Warn("changes reply failed", "error", err)
+		} else {
+			d.ChangesPosted = true
+		}
+	}
+	if d.Resyncs == 0 || d.Resyncs == d.ResyncShown {
+		return
+	}
+	p := Payload{Channel: d.Msg.Channel, Text: RenderResync(d)}
+	var err error
+	if d.ResyncMsg.Posted() {
+		p.TS = d.ResyncMsg.TS
+		err = w.a.Slack.Update(ctx, p)
+	} else {
+		p.ThreadTS = d.Msg.TS
+		d.ResyncMsg, err = w.a.Slack.Post(ctx, p)
+	}
+	if err != nil {
+		w.a.Log.Warn("resync reply failed", "error", err)
+		return
+	}
+	d.ResyncShown = d.Resyncs
+}
+
 func noteOf(m *Mute) string {
 	if m == nil {
 		return ""
@@ -160,6 +196,7 @@ func (w *worker) sync(ctx context.Context, rec *AppRecord) {
 		} else if err := w.update(ctx, d.Msg, render); err != nil {
 			w.a.Log.Error("update deploy", "app", rec.App, "error", err)
 		}
+		w.deployReplies(ctx, v, d)
 		w.thread(ctx, d.Msg, d.Timeline)
 	}
 
